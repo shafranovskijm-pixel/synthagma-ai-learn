@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,9 +18,13 @@ import {
   Sparkles,
   Upload,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Loader2
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
 
 type LessonType = "text" | "video" | "image" | "test";
 
@@ -48,10 +52,67 @@ const lessonColors = {
 
 export default function CourseBuilder() {
   const navigate = useNavigate();
+  const { courseId } = useParams();
+  const { user } = useAuth();
   const [courseTitle, setCourseTitle] = useState("");
   const [courseDescription, setCourseDescription] = useState("");
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(!!courseId);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
+
+  // Fetch organization ID and course data if editing
+  useEffect(() => {
+    const fetchData = async () => {
+      if (!user) return;
+
+      // Get organization ID from profile
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("organization_id")
+        .eq("user_id", user.id)
+        .single();
+
+      if (profile?.organization_id) {
+        setOrganizationId(profile.organization_id);
+      }
+
+      // If editing existing course, fetch course data
+      if (courseId) {
+        const { data: course } = await supabase
+          .from("courses")
+          .select("*")
+          .eq("id", courseId)
+          .single();
+
+        if (course) {
+          setCourseTitle(course.title);
+          setCourseDescription(course.description || "");
+        }
+
+        // Fetch lessons
+        const { data: lessonsData } = await supabase
+          .from("lessons")
+          .select("*")
+          .eq("course_id", courseId)
+          .order("order_index");
+
+        if (lessonsData) {
+          setLessons(lessonsData.map(l => ({
+            id: l.id,
+            type: l.type as LessonType,
+            title: l.title,
+            content: l.content || "",
+            expanded: false
+          })));
+        }
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [user, courseId]);
 
   const addLesson = (type: LessonType) => {
     const newLesson: Lesson = {
@@ -76,6 +137,80 @@ export default function CourseBuilder() {
     setLessons(lessons.map(l => l.id === id ? { ...l, expanded: !l.expanded } : l));
   };
 
+  const saveCourse = async () => {
+    if (!courseTitle.trim()) {
+      toast.error("Введите название курса");
+      return;
+    }
+
+    if (!organizationId) {
+      toast.error("Не найдена организация");
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      let savedCourseId = courseId;
+
+      if (courseId) {
+        // Update existing course
+        const { error } = await supabase
+          .from("courses")
+          .update({
+            title: courseTitle.trim(),
+            description: courseDescription.trim() || null,
+          })
+          .eq("id", courseId);
+
+        if (error) throw error;
+
+        // Delete existing lessons and recreate
+        await supabase.from("lessons").delete().eq("course_id", courseId);
+      } else {
+        // Create new course
+        const { data: newCourse, error } = await supabase
+          .from("courses")
+          .insert({
+            title: courseTitle.trim(),
+            description: courseDescription.trim() || null,
+            organization_id: organizationId,
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        savedCourseId = newCourse.id;
+      }
+
+      // Insert lessons
+      if (lessons.length > 0 && savedCourseId) {
+        const lessonsToInsert = lessons.map((lesson, index) => ({
+          id: lesson.id,
+          course_id: savedCourseId,
+          title: lesson.title,
+          type: lesson.type,
+          content: lesson.content || null,
+          order_index: index,
+        }));
+
+        const { error: lessonsError } = await supabase
+          .from("lessons")
+          .insert(lessonsToInsert);
+
+        if (lessonsError) throw lessonsError;
+      }
+
+      toast.success(courseId ? "Курс обновлён" : "Курс создан");
+      navigate("/organization");
+    } catch (error: any) {
+      console.error("Error saving course:", error);
+      toast.error("Ошибка сохранения: " + error.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const generateWithAI = async () => {
     if (!courseTitle) return;
     setIsGenerating(true);
@@ -93,6 +228,14 @@ export default function CourseBuilder() {
     setLessons(generatedLessons);
     setIsGenerating(false);
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -117,9 +260,13 @@ export default function CourseBuilder() {
                 <Eye className="w-4 h-4" />
                 Предпросмотр
               </Button>
-              <Button className="btn-gradient rounded-xl gap-2">
-                <Save className="w-4 h-4" />
-                Сохранить курс
+              <Button 
+                onClick={saveCourse}
+                disabled={isSaving}
+                className="btn-gradient rounded-xl gap-2"
+              >
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {isSaving ? "Сохранение..." : "Сохранить курс"}
               </Button>
             </div>
           </div>
