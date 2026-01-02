@@ -7,10 +7,12 @@ const corsHeaders = {
 };
 
 interface RegisterStudentRequest {
-  token: string;
+  token?: string | null;
   email: string;
   password: string;
   full_name: string;
+  organization_id?: string | null;
+  course_id?: string | null;
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -26,32 +28,54 @@ const handler = async (req: Request): Promise<Response> => {
       auth: { autoRefreshToken: false, persistSession: false }
     });
 
-    const { token, email, password, full_name }: RegisterStudentRequest = await req.json();
+    const { token, email, password, full_name, organization_id, course_id }: RegisterStudentRequest = await req.json();
 
-    if (!token || !email || !password || !full_name) {
+    console.log("Register student request:", { token, email, full_name, organization_id, course_id });
+
+    if (!email || !password || !full_name) {
       return new Response(
         JSON.stringify({ error: "Missing required fields" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // Verify the registration link
-    const { data: link, error: linkError } = await supabaseAdmin
-      .from("registration_links")
-      .select("*")
-      .eq("token", token)
-      .single();
+    let orgId = organization_id;
 
-    if (linkError || !link) {
-      return new Response(
-        JSON.stringify({ error: "Invalid registration link" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    // If token provided, verify registration link
+    if (token) {
+      const { data: link, error: linkError } = await supabaseAdmin
+        .from("registration_links")
+        .select("*")
+        .eq("token", token)
+        .single();
+
+      if (linkError || !link) {
+        console.error("Link not found:", linkError);
+        return new Response(
+          JSON.stringify({ error: "Invalid registration link" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (new Date(link.expires_at) < new Date()) {
+        return new Response(
+          JSON.stringify({ error: "Registration link has expired" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      orgId = link.organization_id;
+
+      // Update link usage count
+      await supabaseAdmin
+        .from("registration_links")
+        .update({ used_count: (link.used_count || 0) + 1 })
+        .eq("id", link.id);
     }
 
-    if (new Date(link.expires_at) < new Date()) {
+    if (!orgId) {
       return new Response(
-        JSON.stringify({ error: "Registration link has expired" }),
+        JSON.stringify({ error: "Organization ID required" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -76,6 +100,7 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     const userId = authData.user.id;
+    console.log("User created:", userId);
 
     // Wait a moment for the trigger to create profile and role
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -84,7 +109,7 @@ const handler = async (req: Request): Promise<Response> => {
     const { error: profileError } = await supabaseAdmin
       .from("profiles")
       .update({ 
-        organization_id: link.organization_id,
+        organization_id: orgId,
         full_name: full_name 
       })
       .eq("user_id", userId);
@@ -93,19 +118,31 @@ const handler = async (req: Request): Promise<Response> => {
       console.error("Profile update error:", profileError);
     }
 
-    // Update link usage count
-    await supabaseAdmin
-      .from("registration_links")
-      .update({ used_count: (link.used_count || 0) + 1 })
-      .eq("id", link.id);
+    // If course_id provided, create enrollment
+    if (course_id) {
+      const { error: enrollError } = await supabaseAdmin
+        .from("enrollments")
+        .insert({
+          user_id: userId,
+          course_id: course_id,
+          status: "active",
+          progress: 0
+        });
 
-    console.log("Student registered successfully:", { userId, organizationId: link.organization_id });
+      if (enrollError) {
+        console.error("Enrollment error:", enrollError);
+      } else {
+        console.log("Student enrolled in course:", course_id);
+      }
+    }
+
+    console.log("Student registered successfully:", { userId, organizationId: orgId });
 
     return new Response(
       JSON.stringify({ 
         success: true, 
         user_id: userId,
-        organization_id: link.organization_id
+        organization_id: orgId
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
