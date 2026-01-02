@@ -14,7 +14,6 @@ import {
   Upload,
   FileSpreadsheet,
   Search,
-  MoreHorizontal,
   Eye,
   TrendingUp,
   Clock,
@@ -22,7 +21,11 @@ import {
   XCircle,
   Loader2,
   Edit,
-  Trash2
+  Trash2,
+  FileText,
+  Download,
+  X,
+  ChevronRight
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -41,6 +44,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -67,10 +71,49 @@ interface Student {
   status: string;
 }
 
+interface OrgDocument {
+  id: string;
+  type: string;
+  name: string;
+  file_url: string | null;
+  created_at: string;
+}
+
+interface StudentDocument {
+  id: string;
+  type: string;
+  name: string;
+  file_url: string | null;
+}
+
+interface TestAttempt {
+  id: string;
+  lesson_id: string;
+  lesson_title: string;
+  score: number;
+  max_score: number;
+  completed_at: string;
+  answers: Record<string, number>;
+}
+
+interface TestQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correct_answer: number;
+  order_index: number;
+}
+
+interface StudentDetails {
+  student: Student;
+  documents: StudentDocument[];
+  testAttempts: TestAttempt[];
+}
+
 export default function OrganizationDashboard() {
   const navigate = useNavigate();
   const { signOut, user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"students" | "courses" | "stats">("students");
+  const [activeTab, setActiveTab] = useState<"students" | "courses" | "documents" | "stats">("students");
   const [searchQuery, setSearchQuery] = useState("");
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showAddStudentDialog, setShowAddStudentDialog] = useState(false);
@@ -81,6 +124,18 @@ export default function OrganizationDashboard() {
   const [selectedCourseId, setSelectedCourseId] = useState<string>("");
   const [students, setStudents] = useState<Student[]>([]);
   const [isLoadingStudents, setIsLoadingStudents] = useState(true);
+  const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [organizationName, setOrganizationName] = useState("Организация");
+  
+  // Documents state
+  const [orgDocuments, setOrgDocuments] = useState<OrgDocument[]>([]);
+  const [isLoadingDocs, setIsLoadingDocs] = useState(false);
+  
+  // Student details dialog
+  const [selectedStudent, setSelectedStudent] = useState<StudentDetails | null>(null);
+  const [showStudentDialog, setShowStudentDialog] = useState(false);
+  const [isLoadingStudentDetails, setIsLoadingStudentDetails] = useState(false);
+  const [testQuestions, setTestQuestions] = useState<Record<string, TestQuestion[]>>({});
   
   // Statistics state
   const [stats, setStats] = useState({
@@ -90,9 +145,9 @@ export default function OrganizationDashboard() {
     averageProgress: 0
   });
 
-  // Fetch courses and stats from database
+  // Fetch organization data
   useEffect(() => {
-    const fetchCoursesAndStats = async () => {
+    const fetchData = async () => {
       if (!user) return;
 
       try {
@@ -108,7 +163,19 @@ export default function OrganizationDashboard() {
           return;
         }
 
-        const organizationId = profile.organization_id;
+        const orgId = profile.organization_id;
+        setOrganizationId(orgId);
+
+        // Get organization name
+        const { data: orgData } = await supabase
+          .from("organizations")
+          .select("name")
+          .eq("id", orgId)
+          .single();
+        
+        if (orgData) {
+          setOrganizationName(orgData.name);
+        }
 
         // Fetch courses for organization
         const { data: coursesData, error } = await supabase
@@ -117,7 +184,7 @@ export default function OrganizationDashboard() {
             *,
             lessons(count)
           `)
-          .eq("organization_id", organizationId)
+          .eq("organization_id", orgId)
           .order("created_at", { ascending: false });
 
         if (error) throw error;
@@ -146,18 +213,18 @@ export default function OrganizationDashboard() {
         const studentsList: Student[] = [];
         for (const enrollment of allEnrollments) {
           const course = coursesData?.find((c: any) => c.id === enrollment.course_id);
-          const { data: profile } = await supabase
+          const { data: studentProfile } = await supabase
             .from("profiles")
             .select("full_name, email")
             .eq("user_id", enrollment.user_id)
             .single();
           
-          if (profile) {
+          if (studentProfile) {
             studentsList.push({
               id: enrollment.user_id,
               enrollment_id: enrollment.id,
-              name: profile.full_name || "Без имени",
-              email: profile.email || "",
+              name: studentProfile.full_name || "Без имени",
+              email: studentProfile.email || "",
               course: course?.title || "—",
               course_id: enrollment.course_id,
               progress: enrollment.progress || 0,
@@ -193,15 +260,42 @@ export default function OrganizationDashboard() {
 
         setCourses(coursesWithStats);
       } catch (error) {
-        console.error("Error fetching courses:", error);
-        toast.error("Ошибка загрузки курсов");
+        console.error("Error fetching data:", error);
+        toast.error("Ошибка загрузки данных");
       } finally {
         setIsLoadingCourses(false);
       }
     };
 
-    fetchCoursesAndStats();
+    fetchData();
   }, [user]);
+
+  // Fetch organization documents
+  useEffect(() => {
+    const fetchOrgDocuments = async () => {
+      if (!organizationId) return;
+      
+      setIsLoadingDocs(true);
+      try {
+        const { data, error } = await supabase
+          .from("org_documents")
+          .select("*")
+          .eq("organization_id", organizationId)
+          .order("created_at", { ascending: false });
+        
+        if (error) throw error;
+        setOrgDocuments(data || []);
+      } catch (error) {
+        console.error("Error fetching documents:", error);
+      } finally {
+        setIsLoadingDocs(false);
+      }
+    };
+
+    if (activeTab === "documents") {
+      fetchOrgDocuments();
+    }
+  }, [organizationId, activeTab]);
 
   const handleLogout = async () => {
     await signOut();
@@ -224,9 +318,338 @@ export default function OrganizationDashboard() {
     }
   };
 
+  // Document upload handler
+  const handleUploadDocument = async (type: string, file: File) => {
+    if (!organizationId) return;
+    
+    try {
+      const filePath = `${organizationId}/${type}/${Date.now()}_${file.name}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from("org-documents")
+        .upload(filePath, file);
+      
+      if (uploadError) throw uploadError;
+      
+      const { data: { publicUrl } } = supabase.storage
+        .from("org-documents")
+        .getPublicUrl(filePath);
+      
+      const { error: dbError } = await supabase
+        .from("org_documents")
+        .insert({
+          organization_id: organizationId,
+          type,
+          name: file.name,
+          file_url: publicUrl
+        });
+      
+      if (dbError) throw dbError;
+      
+      // Refresh documents
+      const { data } = await supabase
+        .from("org_documents")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .order("created_at", { ascending: false });
+      
+      setOrgDocuments(data || []);
+      toast.success("Документ загружен");
+    } catch (error) {
+      console.error("Error uploading document:", error);
+      toast.error("Ошибка загрузки документа");
+    }
+  };
+
+  const handleDeleteDocument = async (docId: string) => {
+    try {
+      const { error } = await supabase
+        .from("org_documents")
+        .delete()
+        .eq("id", docId);
+      
+      if (error) throw error;
+      
+      setOrgDocuments(orgDocuments.filter(d => d.id !== docId));
+      toast.success("Документ удалён");
+    } catch (error) {
+      console.error("Error deleting document:", error);
+      toast.error("Ошибка удаления");
+    }
+  };
+
+  // Student details handler
+  const handleViewStudent = async (student: Student) => {
+    setIsLoadingStudentDetails(true);
+    setShowStudentDialog(true);
+    
+    try {
+      // Fetch student documents
+      const { data: docs } = await supabase
+        .from("student_documents")
+        .select("*")
+        .eq("enrollment_id", student.enrollment_id);
+      
+      // Fetch test attempts for this student
+      const { data: attempts } = await supabase
+        .from("test_attempts")
+        .select("*")
+        .eq("user_id", student.id)
+        .order("completed_at", { ascending: false });
+      
+      // Get lesson titles for attempts
+      const lessonIds = [...new Set((attempts || []).map(a => a.lesson_id))];
+      const testAttemptsWithTitles: TestAttempt[] = [];
+      
+      for (const attempt of attempts || []) {
+        const { data: lesson } = await supabase
+          .from("lessons")
+          .select("title, course_id")
+          .eq("id", attempt.lesson_id)
+          .single();
+        
+        // Only include attempts from this organization's courses
+        if (lesson) {
+          const { data: course } = await supabase
+            .from("courses")
+            .select("organization_id")
+            .eq("id", lesson.course_id)
+            .single();
+          
+          if (course?.organization_id === organizationId) {
+            testAttemptsWithTitles.push({
+              id: attempt.id,
+              lesson_id: attempt.lesson_id,
+              lesson_title: lesson.title,
+              score: attempt.score,
+              max_score: attempt.max_score,
+              completed_at: attempt.completed_at,
+              answers: attempt.answers as Record<string, number>
+            });
+          }
+        }
+      }
+      
+      // Fetch test questions for each lesson
+      const questionsMap: Record<string, TestQuestion[]> = {};
+      for (const lessonId of lessonIds) {
+        const { data: questions } = await supabase
+          .from("test_questions")
+          .select("*")
+          .eq("lesson_id", lessonId)
+          .order("order_index");
+        
+        if (questions) {
+          questionsMap[lessonId] = questions.map(q => ({
+            id: q.id,
+            question: q.question,
+            options: q.options as string[],
+            correct_answer: q.correct_answer,
+            order_index: q.order_index
+          }));
+        }
+      }
+      
+      setTestQuestions(questionsMap);
+      setSelectedStudent({
+        student,
+        documents: (docs || []).map(d => ({
+          id: d.id,
+          type: d.type,
+          name: d.name,
+          file_url: d.file_url
+        })),
+        testAttempts: testAttemptsWithTitles
+      });
+    } catch (error) {
+      console.error("Error fetching student details:", error);
+      toast.error("Ошибка загрузки данных ученика");
+    } finally {
+      setIsLoadingStudentDetails(false);
+    }
+  };
+
+  // Student document upload
+  const handleUploadStudentDocument = async (enrollmentId: string, type: string, file: File) => {
+    try {
+      const filePath = `${enrollmentId}/${type}/${Date.now()}_${file.name}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from("student-documents")
+        .upload(filePath, file);
+      
+      if (uploadError) throw uploadError;
+      
+      const { data: { publicUrl } } = supabase.storage
+        .from("student-documents")
+        .getPublicUrl(filePath);
+      
+      const { error: dbError } = await supabase
+        .from("student_documents")
+        .insert({
+          enrollment_id: enrollmentId,
+          type,
+          name: file.name,
+          file_url: publicUrl
+        });
+      
+      if (dbError) throw dbError;
+      
+      // Refresh student details
+      if (selectedStudent) {
+        handleViewStudent(selectedStudent.student);
+      }
+      
+      toast.success("Документ загружен");
+    } catch (error) {
+      console.error("Error uploading student document:", error);
+      toast.error("Ошибка загрузки документа");
+    }
+  };
+
+  const handleDeleteStudentDocument = async (docId: string) => {
+    try {
+      const { error } = await supabase
+        .from("student_documents")
+        .delete()
+        .eq("id", docId);
+      
+      if (error) throw error;
+      
+      if (selectedStudent) {
+        setSelectedStudent({
+          ...selectedStudent,
+          documents: selectedStudent.documents.filter(d => d.id !== docId)
+        });
+      }
+      
+      toast.success("Документ удалён");
+    } catch (error) {
+      console.error("Error deleting document:", error);
+      toast.error("Ошибка удаления");
+    }
+  };
+
   const filteredStudents = students.filter(s => 
     s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     s.email.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const getDocsByType = (type: string) => orgDocuments.filter(d => d.type === type);
+
+  // Document section component
+  const DocumentSection = ({ title, type, docs }: { title: string; type: string; docs: OrgDocument[] }) => (
+    <div className="bg-secondary/30 rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="font-medium">{title}</h4>
+        <label className="cursor-pointer">
+          <input
+            type="file"
+            className="hidden"
+            accept=".pdf,.doc,.docx"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleUploadDocument(type, file);
+            }}
+          />
+          <div className="flex items-center gap-1 text-sm text-primary hover:underline">
+            <Upload className="w-4 h-4" />
+            Загрузить
+          </div>
+        </label>
+      </div>
+      {docs.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Нет документов</p>
+      ) : (
+        <div className="space-y-2">
+          {docs.map(doc => (
+            <div key={doc.id} className="flex items-center justify-between p-2 bg-background rounded-lg">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm truncate max-w-[200px]">{doc.name}</span>
+              </div>
+              <div className="flex gap-1">
+                {doc.file_url && (
+                  <a href={doc.file_url} target="_blank" rel="noopener noreferrer">
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                      <Download className="w-4 h-4" />
+                    </Button>
+                  </a>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                  onClick={() => handleDeleteDocument(doc.id)}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  // Student document section
+  const StudentDocSection = ({ title, type, docs, enrollmentId }: { 
+    title: string; 
+    type: string; 
+    docs: StudentDocument[]; 
+    enrollmentId: string;
+  }) => (
+    <div className="bg-secondary/30 rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="font-medium">{title}</h4>
+        <label className="cursor-pointer">
+          <input
+            type="file"
+            className="hidden"
+            accept=".pdf,.doc,.docx"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleUploadStudentDocument(enrollmentId, type, file);
+            }}
+          />
+          <div className="flex items-center gap-1 text-sm text-primary hover:underline">
+            <Upload className="w-4 h-4" />
+            Загрузить
+          </div>
+        </label>
+      </div>
+      {docs.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Нет документов</p>
+      ) : (
+        <div className="space-y-2">
+          {docs.map(doc => (
+            <div key={doc.id} className="flex items-center justify-between p-2 bg-background rounded-lg">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-muted-foreground" />
+                <span className="text-sm truncate max-w-[200px]">{doc.name}</span>
+              </div>
+              <div className="flex gap-1">
+                {doc.file_url && (
+                  <a href={doc.file_url} target="_blank" rel="noopener noreferrer">
+                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                      <Download className="w-4 h-4" />
+                    </Button>
+                  </a>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                  onClick={() => handleDeleteStudentDocument(doc.id)}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 
   return (
@@ -236,7 +659,7 @@ export default function OrganizationDashboard() {
         <div className="p-6 border-b border-border">
           <SigmaLogo size="md" />
           <div className="mt-4 p-3 bg-secondary rounded-xl">
-            <div className="font-semibold text-sm">УЦ СТАТУС</div>
+            <div className="font-semibold text-sm">{organizationName}</div>
             <div className="text-xs text-muted-foreground">Организация</div>
           </div>
         </div>
@@ -264,6 +687,17 @@ export default function OrganizationDashboard() {
             >
               <BookOpen className="w-5 h-5" />
               Курсы
+            </button>
+            <button 
+              onClick={() => setActiveTab("documents")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${
+                activeTab === "documents" 
+                  ? "bg-primary/10 text-primary" 
+                  : "text-muted-foreground hover:bg-secondary"
+              }`}
+            >
+              <FileText className="w-5 h-5" />
+              Документы
             </button>
             <button 
               onClick={() => setActiveTab("stats")}
@@ -303,9 +737,10 @@ export default function OrganizationDashboard() {
               <h1 className="font-display text-2xl font-bold">
                 {activeTab === "students" && "Управление учениками"}
                 {activeTab === "courses" && "Управление курсами"}
+                {activeTab === "documents" && "Документы организации"}
                 {activeTab === "stats" && "Статистика обучения"}
               </h1>
-              <p className="text-muted-foreground">Учебный центр СТАТУС</p>
+              <p className="text-muted-foreground">{organizationName}</p>
             </div>
             <div className="flex gap-3">
               {activeTab === "students" && (
@@ -503,7 +938,7 @@ export default function OrganizationDashboard() {
                   </thead>
                   <tbody>
                     {filteredStudents.map((student) => (
-                      <tr key={student.id} className="border-b border-border last:border-0 hover:bg-secondary/50 transition-colors">
+                      <tr key={student.enrollment_id} className="border-b border-border last:border-0 hover:bg-secondary/50 transition-colors">
                         <td className="px-6 py-4">
                           <div>
                             <div className="font-medium">{student.name}</div>
@@ -542,7 +977,12 @@ export default function OrganizationDashboard() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex gap-1">
-                            <Button variant="ghost" size="sm" className="rounded-lg">
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="rounded-lg"
+                              onClick={() => handleViewStudent(student)}
+                            >
                               <Eye className="w-4 h-4" />
                             </Button>
                             <Button 
@@ -557,6 +997,17 @@ export default function OrganizationDashboard() {
                         </td>
                       </tr>
                     ))}
+                    {filteredStudents.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
+                          {isLoadingStudents ? (
+                            <Loader2 className="w-6 h-6 animate-spin mx-auto" />
+                          ) : (
+                            "Нет учеников"
+                          )}
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -622,6 +1073,23 @@ export default function OrganizationDashboard() {
             </div>
           )}
 
+          {activeTab === "documents" && (
+            <div className="bg-card rounded-2xl border border-border p-6">
+              <h2 className="font-display text-xl font-semibold mb-6">Документы организации</h2>
+              {isLoadingDocs ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                </div>
+              ) : (
+                <div className="grid md:grid-cols-3 gap-6">
+                  <DocumentSection title="Договоры" type="contract" docs={getDocsByType("contract")} />
+                  <DocumentSection title="Счета" type="invoice" docs={getDocsByType("invoice")} />
+                  <DocumentSection title="Акты" type="act" docs={getDocsByType("act")} />
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab === "stats" && (
             <div className="space-y-6">
               <div className="bg-card rounded-2xl border border-border p-6">
@@ -671,6 +1139,135 @@ export default function OrganizationDashboard() {
           )}
         </div>
       </main>
+
+      {/* Student Details Dialog */}
+      <Dialog open={showStudentDialog} onOpenChange={setShowStudentDialog}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">
+              {selectedStudent?.student.name || "Ученик"}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedStudent?.student.email} • {selectedStudent?.student.course}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {isLoadingStudentDetails ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            </div>
+          ) : selectedStudent && (
+            <Tabs defaultValue="documents" className="mt-4">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="documents">Документы</TabsTrigger>
+                <TabsTrigger value="tests">Результаты тестов</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="documents" className="space-y-4 mt-4">
+                <div className="grid md:grid-cols-2 gap-4">
+                  <StudentDocSection 
+                    title="Приказ о зачислении" 
+                    type="enrollment_order" 
+                    docs={selectedStudent.documents.filter(d => d.type === 'enrollment_order')}
+                    enrollmentId={selectedStudent.student.enrollment_id}
+                  />
+                  <StudentDocSection 
+                    title="Приказ об отчислении" 
+                    type="expulsion_order" 
+                    docs={selectedStudent.documents.filter(d => d.type === 'expulsion_order')}
+                    enrollmentId={selectedStudent.student.enrollment_id}
+                  />
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="tests" className="space-y-4 mt-4">
+                {selectedStudent.testAttempts.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    Нет результатов тестирования
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {selectedStudent.testAttempts.map((attempt) => {
+                      const questions = testQuestions[attempt.lesson_id] || [];
+                      const percentage = attempt.max_score > 0 
+                        ? Math.round((attempt.score / attempt.max_score) * 100) 
+                        : 0;
+                      
+                      return (
+                        <div key={attempt.id} className="bg-secondary/30 rounded-xl p-4">
+                          <div className="flex items-center justify-between mb-3">
+                            <div>
+                              <h4 className="font-medium">{attempt.lesson_title}</h4>
+                              <p className="text-sm text-muted-foreground">
+                                {new Date(attempt.completed_at).toLocaleDateString('ru-RU', {
+                                  day: 'numeric',
+                                  month: 'long',
+                                  year: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </p>
+                            </div>
+                            <div className={`text-lg font-bold ${
+                              percentage >= 70 ? 'text-sigma-green' : 'text-destructive'
+                            }`}>
+                              {attempt.score}/{attempt.max_score} ({percentage}%)
+                            </div>
+                          </div>
+                          
+                          {questions.length > 0 && (
+                            <div className="space-y-2 mt-4 border-t border-border pt-4">
+                              <p className="text-sm font-medium text-muted-foreground mb-2">Ответы:</p>
+                              {questions.map((q, idx) => {
+                                const userAnswer = attempt.answers[q.id];
+                                const isCorrect = userAnswer === q.correct_answer;
+                                
+                                return (
+                                  <div 
+                                    key={q.id} 
+                                    className={`p-3 rounded-lg border ${
+                                      isCorrect 
+                                        ? 'bg-sigma-green/5 border-sigma-green/20' 
+                                        : 'bg-destructive/5 border-destructive/20'
+                                    }`}
+                                  >
+                                    <div className="flex items-start gap-2">
+                                      {isCorrect ? (
+                                        <CheckCircle2 className="w-5 h-5 text-sigma-green shrink-0 mt-0.5" />
+                                      ) : (
+                                        <XCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+                                      )}
+                                      <div className="flex-1">
+                                        <p className="text-sm font-medium">{idx + 1}. {q.question}</p>
+                                        <div className="mt-1 text-sm">
+                                          <span className="text-muted-foreground">Ответ: </span>
+                                          <span className={isCorrect ? 'text-sigma-green' : 'text-destructive'}>
+                                            {q.options[userAnswer] || '—'}
+                                          </span>
+                                          {!isCorrect && (
+                                            <>
+                                              <span className="text-muted-foreground"> • Правильно: </span>
+                                              <span className="text-sigma-green">{q.options[q.correct_answer]}</span>
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
