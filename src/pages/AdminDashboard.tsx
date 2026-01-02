@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { SigmaLogo } from "@/components/ui/SigmaLogo";
 import { 
@@ -15,6 +14,7 @@ import {
   Search
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { useAuth } from "@/hooks/useAuth";
 
 const organizations = [
   { 
@@ -50,12 +50,11 @@ const organizations = [
 ];
 
 export default function AdminDashboard() {
-  const navigate = useNavigate();
+  const { signOut } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
 
-  const handleLogout = () => {
-    localStorage.removeItem("user");
-    navigate("/login");
+  const handleLogout = async () => {
+    await signOut();
   };
 
   const filteredOrgs = organizations.filter(org => 

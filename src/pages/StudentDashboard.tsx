@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { SigmaLogo } from "@/components/ui/SigmaLogo";
 import { 
@@ -53,14 +53,13 @@ const aiMessages = [
 ];
 
 export default function StudentDashboard() {
-  const navigate = useNavigate();
+  const { signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<"courses" | "chat">("courses");
   const [messages, setMessages] = useState(aiMessages);
   const [inputValue, setInputValue] = useState("");
 
-  const handleLogout = () => {
-    localStorage.removeItem("user");
-    navigate("/login");
+  const handleLogout = async () => {
+    await signOut();
   };
 
   const handleSendMessage = () => {

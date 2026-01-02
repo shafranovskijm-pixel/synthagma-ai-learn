@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,63 +6,78 @@ import { Label } from "@/components/ui/label";
 import { SigmaLogo } from "@/components/ui/SigmaLogo";
 import { Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
+import { z } from "zod";
 
-// Demo credentials for testing
-const DEMO_ACCOUNTS = {
-  admin: { email: "admin@sintagma.ru", password: "admin123", role: "admin" },
-  org: { email: "status@sintagma.ru", password: "status123", role: "organization" },
-  student: { email: "student@status.ru", password: "student123", role: "student" },
-};
+// Input validation schema
+const loginSchema = z.object({
+  email: z.string().trim().email({ message: "Введите корректный email" }).max(255),
+  password: z.string().min(6, { message: "Пароль должен быть не менее 6 символов" }).max(128),
+});
 
 export default function Login() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user, role, loading, signIn } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (!loading && user && role) {
+      const redirectPath = role === 'admin' ? '/admin' : role === 'organization' ? '/organization' : '/student';
+      navigate(redirectPath, { replace: true });
+    }
+  }, [user, role, loading, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrors({});
+    
+    // Validate inputs
+    const result = loginSchema.safeParse({ email, password });
+    if (!result.success) {
+      const fieldErrors: { email?: string; password?: string } = {};
+      result.error.errors.forEach((err) => {
+        if (err.path[0] === 'email') fieldErrors.email = err.message;
+        if (err.path[0] === 'password') fieldErrors.password = err.message;
+      });
+      setErrors(fieldErrors);
+      return;
+    }
+
     setIsLoading(true);
 
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const { error } = await signIn(email, password);
 
-    // Check demo accounts
-    const account = Object.values(DEMO_ACCOUNTS).find(
-      (acc) => acc.email === email && acc.password === password
-    );
-
-    if (account) {
-      localStorage.setItem("user", JSON.stringify(account));
-      toast({
-        title: "Успешный вход!",
-        description: `Добро пожаловать в систему`,
-      });
-      
-      if (account.role === "admin") {
-        navigate("/admin");
-      } else if (account.role === "organization") {
-        navigate("/organization");
-      } else {
-        navigate("/student");
-      }
-    } else {
+    if (error) {
       toast({
         title: "Ошибка входа",
-        description: "Неверный email или пароль",
+        description: error.message === "Invalid login credentials" 
+          ? "Неверный email или пароль" 
+          : error.message,
         variant: "destructive",
+      });
+    } else {
+      toast({
+        title: "Успешный вход!",
+        description: "Добро пожаловать в систему",
       });
     }
 
     setIsLoading(false);
   };
 
-  const fillDemoCredentials = (type: keyof typeof DEMO_ACCOUNTS) => {
-    setEmail(DEMO_ACCOUNTS[type].email);
-    setPassword(DEMO_ACCOUNTS[type].password);
-  };
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -90,9 +105,10 @@ export default function Login() {
                 placeholder="example@mail.ru"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="h-12 rounded-xl"
+                className={`h-12 rounded-xl ${errors.email ? 'border-destructive' : ''}`}
                 required
               />
+              {errors.email && <p className="text-sm text-destructive">{errors.email}</p>}
             </div>
 
             <div className="space-y-2">
@@ -104,7 +120,7 @@ export default function Login() {
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="h-12 rounded-xl pr-12"
+                  className={`h-12 rounded-xl pr-12 ${errors.password ? 'border-destructive' : ''}`}
                   required
                 />
                 <button
@@ -115,6 +131,7 @@ export default function Login() {
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
               </div>
+              {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
             </div>
 
             <Button
@@ -125,37 +142,6 @@ export default function Login() {
               {isLoading ? "Вход..." : "Войти"}
             </Button>
           </form>
-
-          {/* Demo accounts */}
-          <div className="mt-8 p-4 bg-secondary/50 rounded-xl">
-            <p className="text-sm font-medium mb-3">Демо-аккаунты для проверки:</p>
-            <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => fillDemoCredentials("admin")}
-                className="w-full text-left p-2 rounded-lg hover:bg-secondary transition-colors text-sm"
-              >
-                <span className="font-medium">Администратор:</span>{" "}
-                <span className="text-muted-foreground">admin@sintagma.ru / admin123</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => fillDemoCredentials("org")}
-                className="w-full text-left p-2 rounded-lg hover:bg-secondary transition-colors text-sm"
-              >
-                <span className="font-medium">УЦ СТАТУС:</span>{" "}
-                <span className="text-muted-foreground">status@sintagma.ru / status123</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => fillDemoCredentials("student")}
-                className="w-full text-left p-2 rounded-lg hover:bg-secondary transition-colors text-sm"
-              >
-                <span className="font-medium">Ученик:</span>{" "}
-                <span className="text-muted-foreground">student@status.ru / student123</span>
-              </button>
-            </div>
-          </div>
 
           <p className="text-center text-muted-foreground mt-8">
             Нет аккаунта?{" "}
