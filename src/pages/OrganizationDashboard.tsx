@@ -135,7 +135,7 @@ interface RegistrationLink {
 export default function OrganizationDashboard() {
   const navigate = useNavigate();
   const { signOut, user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"courses" | "organizations" | "stats" | "links">("courses");
+  const [activeTab, setActiveTab] = useState<"courses" | "organizations" | "students" | "stats" | "links">("courses");
   const [searchQuery, setSearchQuery] = useState("");
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showAddStudentDialog, setShowAddStudentDialog] = useState(false);
@@ -1163,6 +1163,17 @@ export default function OrganizationDashboard() {
               Компании
             </button>
             <button 
+              onClick={() => setActiveTab("students")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${
+                activeTab === "students" 
+                  ? "bg-primary/10 text-primary" 
+                  : "text-muted-foreground hover:bg-secondary"
+              }`}
+            >
+              <Users className="w-5 h-5" />
+              Ученики
+            </button>
+            <button 
               onClick={() => setActiveTab("stats")}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${
                 activeTab === "stats" 
@@ -1211,6 +1222,7 @@ export default function OrganizationDashboard() {
               <h1 className="font-display text-2xl font-bold">
                 {activeTab === "courses" && "Управление курсами"}
                 {activeTab === "organizations" && "Компании"}
+                {activeTab === "students" && "Все ученики"}
                 {activeTab === "stats" && "Статистика обучения"}
                 {activeTab === "links" && "Ссылки для регистрации"}
               </h1>
@@ -1501,6 +1513,104 @@ export default function OrganizationDashboard() {
                           </td>
                         </tr>
                       )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === "students" && (
+            <div className="bg-card rounded-2xl border border-border">
+              <div className="p-6 border-b border-border flex items-center justify-between">
+                <h2 className="font-display text-xl font-semibold">Все ученики</h2>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input 
+                    placeholder="Поиск по имени или email..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10 w-64 rounded-xl"
+                  />
+                </div>
+              </div>
+              
+              {isLoadingStudents ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                </div>
+              ) : filteredStudents.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                  <p>Нет учеников</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Ученик</th>
+                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Курс</th>
+                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Прогресс</th>
+                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Статус</th>
+                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Действия</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredStudents.map((student) => (
+                        <tr key={student.enrollment_id} className="border-b border-border last:border-0 hover:bg-secondary/50 transition-colors">
+                          <td className="px-6 py-4">
+                            <div>
+                              <div className="font-medium">{student.name}</div>
+                              <div className="text-sm text-muted-foreground">{student.email}</div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-sm">{student.course}</td>
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-24 h-2 bg-secondary rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-primary rounded-full transition-all"
+                                  style={{ width: `${student.progress}%` }}
+                                />
+                              </div>
+                              <span className="text-sm font-medium">{student.progress}%</span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                              student.status === 'completed' 
+                                ? 'bg-sigma-green/10 text-sigma-green' 
+                                : student.status === 'active'
+                                  ? 'bg-primary/10 text-primary'
+                                  : 'bg-muted text-muted-foreground'
+                            }`}>
+                              {student.status === 'completed' ? 'Завершён' : student.status === 'active' ? 'Активен' : student.status}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex gap-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="rounded-lg gap-1"
+                                onClick={() => handleViewStudent(student)}
+                              >
+                                <Eye className="w-4 h-4" />
+                                Подробнее
+                              </Button>
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="rounded-lg text-destructive hover:text-destructive"
+                                onClick={() => handleDeleteStudent(student.enrollment_id)}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
