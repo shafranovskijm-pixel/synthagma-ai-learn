@@ -164,6 +164,14 @@ export default function OrganizationDashboard() {
   const [newCompanyContactName, setNewCompanyContactName] = useState("");
   const [newCompanyPhone, setNewCompanyPhone] = useState("");
   const [isCreatingCompany, setIsCreatingCompany] = useState(false);
+  const [showEditCompanyDialog, setShowEditCompanyDialog] = useState(false);
+  const [editingCompany, setEditingCompany] = useState<Organization | null>(null);
+  const [editCompanyName, setEditCompanyName] = useState("");
+  const [editCompanyEmail, setEditCompanyEmail] = useState("");
+  const [editCompanyInn, setEditCompanyInn] = useState("");
+  const [editCompanyContactName, setEditCompanyContactName] = useState("");
+  const [editCompanyPhone, setEditCompanyPhone] = useState("");
+  const [isSavingCompany, setIsSavingCompany] = useState(false);
   
   // Student details dialog
   const [selectedStudent, setSelectedStudent] = useState<StudentDetails | null>(null);
@@ -175,7 +183,7 @@ export default function OrganizationDashboard() {
   const [registrationLinks, setRegistrationLinks] = useState<RegistrationLink[]>([]);
   const [isLoadingLinks, setIsLoadingLinks] = useState(false);
   const [showCreateLinkDialog, setShowCreateLinkDialog] = useState(false);
-  const [newLinkName, setNewLinkName] = useState("");
+  const [newLinkCompanyName, setNewLinkCompanyName] = useState("");
   const [newLinkInn, setNewLinkInn] = useState("");
   const [isCreatingLink, setIsCreatingLink] = useState(false);
   const [isCreatingStudent, setIsCreatingStudent] = useState(false);
@@ -411,7 +419,7 @@ export default function OrganizationDashboard() {
         .insert({
           organization_id: organizationId,
           token,
-          name: newLinkName || null,
+          name: newLinkCompanyName || null,
           inn: newLinkInn || null
         });
       
@@ -426,7 +434,7 @@ export default function OrganizationDashboard() {
       
       setRegistrationLinks(data || []);
       setShowCreateLinkDialog(false);
-      setNewLinkName("");
+      setNewLinkCompanyName("");
       setNewLinkInn("");
       toast.success("Ссылка для регистрации создана");
     } catch (error) {
@@ -776,6 +784,57 @@ export default function OrganizationDashboard() {
       toast.error("Ошибка создания компании");
     } finally {
       setIsCreatingCompany(false);
+    }
+  };
+
+  // Edit company
+  const handleEditCompany = (org: Organization) => {
+    setEditingCompany(org);
+    setEditCompanyName(org.name);
+    setEditCompanyEmail(org.email);
+    setEditCompanyInn(org.inn || "");
+    setEditCompanyContactName(org.contact_name || "");
+    setEditCompanyPhone(org.phone || "");
+    setShowEditCompanyDialog(true);
+  };
+
+  // Save edited company
+  const handleSaveCompany = async () => {
+    if (!editingCompany || !editCompanyName || !editCompanyEmail) {
+      toast.error("Заполните название и email компании");
+      return;
+    }
+
+    setIsSavingCompany(true);
+    try {
+      const { error } = await supabase
+        .from("organizations")
+        .update({
+          name: editCompanyName,
+          email: editCompanyEmail,
+          inn: editCompanyInn || null,
+          contact_name: editCompanyContactName || null,
+          phone: editCompanyPhone || null
+        })
+        .eq("id", editingCompany.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setAllOrganizations(allOrganizations.map(o => 
+        o.id === editingCompany.id 
+          ? { ...o, name: editCompanyName, email: editCompanyEmail, inn: editCompanyInn || null, contact_name: editCompanyContactName || null, phone: editCompanyPhone || null }
+          : o
+      ));
+
+      setShowEditCompanyDialog(false);
+      setEditingCompany(null);
+      toast.success("Компания обновлена");
+    } catch (error) {
+      console.error("Error updating company:", error);
+      toast.error("Ошибка обновления компании");
+    } finally {
+      setIsSavingCompany(false);
     }
   };
 
@@ -1175,16 +1234,16 @@ export default function OrganizationDashboard() {
                     </DialogHeader>
                     <div className="space-y-4 py-4">
                       <div className="space-y-2">
-                        <Label>Название (опционально)</Label>
+                        <Label>Название компании *</Label>
                         <Input 
-                          placeholder="Например: Набор июль 2026" 
+                          placeholder="ООО Пример" 
                           className="rounded-xl"
-                          value={newLinkName}
-                          onChange={(e) => setNewLinkName(e.target.value)}
+                          value={newLinkCompanyName}
+                          onChange={(e) => setNewLinkCompanyName(e.target.value)}
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label>ИНН организации (опционально)</Label>
+                        <Label>ИНН компании *</Label>
                         <Input 
                           placeholder="1234567890" 
                           className="rounded-xl"
@@ -1413,15 +1472,25 @@ export default function OrganizationDashboard() {
                             </span>
                           </td>
                           <td className="px-6 py-4">
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              className="rounded-lg gap-1"
-                              onClick={() => handleViewOrg(org)}
-                            >
-                              <Eye className="w-4 h-4" />
-                              Подробнее
-                            </Button>
+                            <div className="flex gap-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="rounded-lg gap-1"
+                                onClick={() => handleEditCompany(org)}
+                              >
+                                <Edit className="w-4 h-4" />
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="rounded-lg gap-1"
+                                onClick={() => handleViewOrg(org)}
+                              >
+                                <Eye className="w-4 h-4" />
+                                Подробнее
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1870,6 +1939,80 @@ export default function OrganizationDashboard() {
                 </>
               ) : (
                 "Добавить компанию"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Company Dialog */}
+      <Dialog open={showEditCompanyDialog} onOpenChange={setShowEditCompanyDialog}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display">Редактировать компанию</DialogTitle>
+            <DialogDescription>
+              Измените данные компании
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Название компании *</Label>
+              <Input 
+                placeholder="ООО Пример" 
+                className="rounded-xl"
+                value={editCompanyName}
+                onChange={(e) => setEditCompanyName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Email *</Label>
+              <Input 
+                type="email"
+                placeholder="company@example.com" 
+                className="rounded-xl"
+                value={editCompanyEmail}
+                onChange={(e) => setEditCompanyEmail(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>ИНН</Label>
+              <Input 
+                placeholder="1234567890" 
+                className="rounded-xl"
+                value={editCompanyInn}
+                onChange={(e) => setEditCompanyInn(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Контактное лицо</Label>
+              <Input 
+                placeholder="Иванов Иван Иванович" 
+                className="rounded-xl"
+                value={editCompanyContactName}
+                onChange={(e) => setEditCompanyContactName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Телефон</Label>
+              <Input 
+                placeholder="+7 (999) 123-45-67" 
+                className="rounded-xl"
+                value={editCompanyPhone}
+                onChange={(e) => setEditCompanyPhone(e.target.value)}
+              />
+            </div>
+            <Button 
+              className="w-full btn-gradient rounded-xl"
+              onClick={handleSaveCompany}
+              disabled={isSavingCompany}
+            >
+              {isSavingCompany ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Сохранение...
+                </>
+              ) : (
+                "Сохранить изменения"
               )}
             </Button>
           </div>

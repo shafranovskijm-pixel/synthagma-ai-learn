@@ -19,7 +19,7 @@ export default function StudentRegister() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isVerifying, setIsVerifying] = useState(true);
-  const [linkInfo, setLinkInfo] = useState<{ organization_name: string; name?: string } | null>(null);
+  const [linkInfo, setLinkInfo] = useState<{ organization_name: string; company_name?: string; inn?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -34,7 +34,7 @@ export default function StudentRegister() {
       try {
         const { data: link, error: linkError } = await supabase
           .from("registration_links")
-          .select("organization_id, name, expires_at")
+          .select("organization_id, name, inn, expires_at")
           .eq("token", token)
           .single();
 
@@ -58,7 +58,8 @@ export default function StudentRegister() {
 
         setLinkInfo({
           organization_name: org?.name || "Организация",
-          name: link.name || undefined
+          company_name: link.name || undefined,
+          inn: link.inn || undefined
         });
       } catch (err) {
         setError("Ошибка проверки ссылки");
@@ -167,8 +168,15 @@ export default function StudentRegister() {
             <p className="text-muted-foreground">
               Организация: <span className="font-medium text-foreground">{linkInfo?.organization_name}</span>
             </p>
-            {linkInfo?.name && (
-              <p className="text-sm text-muted-foreground mt-1">{linkInfo.name}</p>
+            {linkInfo?.company_name && (
+              <p className="text-sm text-muted-foreground mt-1">
+                Компания: <span className="font-medium text-foreground">{linkInfo.company_name}</span>
+              </p>
+            )}
+            {linkInfo?.inn && (
+              <p className="text-sm text-muted-foreground mt-1">
+                ИНН: <span className="font-medium text-foreground">{linkInfo.inn}</span>
+              </p>
             )}
           </div>
 
