@@ -430,7 +430,17 @@ export default function CourseBuilder() {
               <SigmaLogo size="sm" />
             </div>
             <div className="flex items-center gap-3">
-              <Button variant="outline" className="rounded-xl gap-2">
+              <Button 
+                variant="outline" 
+                className="rounded-xl gap-2"
+                onClick={() => {
+                  if (courseId) {
+                    navigate(`/course-preview/${courseId}`);
+                  } else {
+                    toast.error("Сначала сохраните курс");
+                  }
+                }}
+              >
                 <Eye className="w-4 h-4" />
                 Предпросмотр
               </Button>
