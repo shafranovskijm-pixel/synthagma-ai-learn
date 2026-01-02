@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import DOMPurify from "dompurify";
 import { 
   Plus, 
   GripVertical, 
@@ -34,6 +35,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+
+// Configure DOMPurify to allow safe HTML tags for course content
+const sanitizeHtml = (html: string): string => {
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ['strong', 'b', 'em', 'i', 'u', 'br', 'p', 'span', 'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'td', 'th', 'a', 'img'],
+    ALLOWED_ATTR: ['href', 'target', 'rel', 'src', 'alt', 'class', 'style', 'colspan', 'rowspan'],
+    ALLOW_DATA_ATTR: false,
+  });
+};
 
 export type BlockType = 
   | "paragraph" 
@@ -369,7 +379,7 @@ function BlockContent({ block, onUpdate }: { block: ContentBlock; onUpdate: (upd
           ) : (
             <div 
               className="prose prose-sm dark:prose-invert max-w-none [&_strong]:font-bold [&_em]:italic"
-              dangerouslySetInnerHTML={{ __html: block.content || '<span class="text-muted-foreground">Введите текст...</span>' }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.content) || '<span class="text-muted-foreground">Введите текст...</span>' }}
             />
           )}
         </div>
@@ -401,15 +411,15 @@ function BlockContent({ block, onUpdate }: { block: ContentBlock; onUpdate: (upd
         <div className="space-y-1 py-2">
           <div className="prose prose-sm dark:prose-invert max-w-none">
             {block.type === "bulletList" ? (
-              <ul className="list-disc pl-4">
+            <ul className="list-disc pl-4">
                 {(block.content || "").split("\n").filter(Boolean).map((item, i) => (
-                  <li key={i} dangerouslySetInnerHTML={{ __html: item }} />
+                  <li key={i} dangerouslySetInnerHTML={{ __html: sanitizeHtml(item) }} />
                 ))}
               </ul>
             ) : (
-              <ol className="list-decimal pl-4">
+            <ol className="list-decimal pl-4">
                 {(block.content || "").split("\n").filter(Boolean).map((item, i) => (
-                  <li key={i} dangerouslySetInnerHTML={{ __html: item }} />
+                  <li key={i} dangerouslySetInnerHTML={{ __html: sanitizeHtml(item) }} />
                 ))}
               </ol>
             )}
@@ -837,19 +847,19 @@ function RenderBlock({
 
   switch (block.type) {
     case "paragraph":
-      return <p dangerouslySetInnerHTML={{ __html: block.content }} />;
+      return <p dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.content) }} />;
 
     case "heading1":
-      return <h1 className="text-2xl font-bold" dangerouslySetInnerHTML={{ __html: block.content }} />;
+      return <h1 className="text-2xl font-bold" dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.content) }} />;
 
     case "heading2":
-      return <h2 className="text-xl font-semibold" dangerouslySetInnerHTML={{ __html: block.content }} />;
+      return <h2 className="text-xl font-semibold" dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.content) }} />;
 
     case "bulletList":
       return (
         <ul className="list-disc pl-6">
           {(block.content || "").split("\n").filter(Boolean).map((item, i) => (
-            <li key={i} dangerouslySetInnerHTML={{ __html: item }} />
+            <li key={i} dangerouslySetInnerHTML={{ __html: sanitizeHtml(item) }} />
           ))}
         </ul>
       );
@@ -858,7 +868,7 @@ function RenderBlock({
       return (
         <ol className="list-decimal pl-6">
           {(block.content || "").split("\n").filter(Boolean).map((item, i) => (
-            <li key={i} dangerouslySetInnerHTML={{ __html: item }} />
+            <li key={i} dangerouslySetInnerHTML={{ __html: sanitizeHtml(item) }} />
           ))}
         </ol>
       );
@@ -866,7 +876,7 @@ function RenderBlock({
     case "quote":
       return (
         <blockquote className="border-l-4 border-muted-foreground/30 pl-4 italic text-muted-foreground">
-          <span dangerouslySetInnerHTML={{ __html: block.content }} />
+          <span dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.content) }} />
         </blockquote>
       );
 
@@ -874,7 +884,7 @@ function RenderBlock({
       return (
         <div className="rounded-xl p-4 bg-blue-500/10 border border-blue-500/30 flex gap-3 not-prose">
           <AlertCircle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-          <p className="text-sm" dangerouslySetInnerHTML={{ __html: block.content }} />
+          <p className="text-sm" dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.content) }} />
         </div>
       );
 
@@ -882,7 +892,7 @@ function RenderBlock({
       return (
         <div className="rounded-xl p-4 bg-amber-500/10 border border-amber-500/30 flex gap-3 not-prose">
           <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
-          <p className="text-sm" dangerouslySetInnerHTML={{ __html: block.content }} />
+          <p className="text-sm" dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.content) }} />
         </div>
       );
 
@@ -890,7 +900,7 @@ function RenderBlock({
       return (
         <div className="rounded-xl p-4 bg-green-500/10 border border-green-500/30 flex gap-3 not-prose">
           <Lightbulb className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-          <p className="text-sm" dangerouslySetInnerHTML={{ __html: block.content }} />
+          <p className="text-sm" dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.content) }} />
         </div>
       );
 
@@ -906,7 +916,7 @@ function RenderBlock({
           </button>
           {accordionOpen && (
             <div className="p-3 pt-0 border-t border-purple-500/20">
-              <p className="text-sm" dangerouslySetInnerHTML={{ __html: block.content }} />
+              <p className="text-sm" dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.content) }} />
             </div>
           )}
         </div>
@@ -1039,7 +1049,7 @@ function RenderBlock({
         <div className="not-prose my-4 overflow-x-auto">
           <div 
             className="min-w-full [&_table]:min-w-full [&_table]:text-sm [&_table]:border [&_table]:border-border [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:bg-muted [&_th]:font-semibold"
-            dangerouslySetInnerHTML={{ __html: block.tableHtml || "" }}
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(block.tableHtml || "") }}
           />
         </div>
       );
