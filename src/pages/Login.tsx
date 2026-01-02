@@ -18,9 +18,10 @@ const loginSchema = z.object({
 export default function Login() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user, role, loading, signIn } = useAuth();
+  const { user, role, loading, signIn, resetPassword } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isResetMode, setIsResetMode] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
@@ -71,6 +72,40 @@ export default function Login() {
     setIsLoading(false);
   };
 
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrors({});
+    
+    // Validate email only
+    const emailValidation = z.string().trim().email({ message: "Введите корректный email" }).max(255);
+    const result = emailValidation.safeParse(email);
+    
+    if (!result.success) {
+      setErrors({ email: result.error.errors[0].message });
+      return;
+    }
+
+    setIsLoading(true);
+
+    const { error } = await resetPassword(email);
+
+    if (error) {
+      toast({
+        title: "Ошибка",
+        description: error.message,
+        variant: "destructive",
+      });
+    } else {
+      toast({
+        title: "Письмо отправлено!",
+        description: "Проверьте вашу почту для восстановления пароля",
+      });
+      setIsResetMode(false);
+    }
+
+    setIsLoading(false);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -91,57 +126,104 @@ export default function Login() {
 
           <SigmaLogo size="lg" className="mb-8" />
 
-          <h1 className="font-display text-3xl font-bold mb-2">Войти в систему</h1>
+          <h1 className="font-display text-3xl font-bold mb-2">
+            {isResetMode ? "Восстановление пароля" : "Войти в систему"}
+          </h1>
           <p className="text-muted-foreground mb-8">
-            Введите свои учётные данные для входа
+            {isResetMode 
+              ? "Введите email для получения ссылки на восстановление" 
+              : "Введите свои учётные данные для входа"}
           </p>
 
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="example@mail.ru"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className={`h-12 rounded-xl ${errors.email ? 'border-destructive' : ''}`}
-                required
-              />
-              {errors.email && <p className="text-sm text-destructive">{errors.email}</p>}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password">Пароль</Label>
-              <div className="relative">
+          {isResetMode ? (
+            <form onSubmit={handleResetPassword} className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
                 <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className={`h-12 rounded-xl pr-12 ${errors.password ? 'border-destructive' : ''}`}
+                  id="email"
+                  type="email"
+                  placeholder="example@mail.ru"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className={`h-12 rounded-xl ${errors.email ? 'border-destructive' : ''}`}
                   required
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
+                {errors.email && <p className="text-sm text-destructive">{errors.email}</p>}
               </div>
-              {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
-            </div>
 
-            <Button
-              type="submit"
-              className="w-full h-12 btn-gradient rounded-xl text-lg"
-              disabled={isLoading}
-            >
-              {isLoading ? "Вход..." : "Войти"}
-            </Button>
-          </form>
+              <Button
+                type="submit"
+                className="w-full h-12 btn-gradient rounded-xl text-lg"
+                disabled={isLoading}
+              >
+                {isLoading ? "Отправка..." : "Отправить ссылку"}
+              </Button>
+
+              <button
+                type="button"
+                onClick={() => setIsResetMode(false)}
+                className="w-full text-center text-primary font-medium hover:underline"
+              >
+                Вернуться к входу
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleLogin} className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="example@mail.ru"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className={`h-12 rounded-xl ${errors.email ? 'border-destructive' : ''}`}
+                  required
+                />
+                {errors.email && <p className="text-sm text-destructive">{errors.email}</p>}
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">Пароль</Label>
+                  <button
+                    type="button"
+                    onClick={() => setIsResetMode(true)}
+                    className="text-sm text-primary hover:underline"
+                  >
+                    Забыли пароль?
+                  </button>
+                </div>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className={`h-12 rounded-xl pr-12 ${errors.password ? 'border-destructive' : ''}`}
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+                {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
+              </div>
+
+              <Button
+                type="submit"
+                className="w-full h-12 btn-gradient rounded-xl text-lg"
+                disabled={isLoading}
+              >
+                {isLoading ? "Вход..." : "Войти"}
+              </Button>
+            </form>
+          )}
 
           <p className="text-center text-muted-foreground mt-8">
             Нет аккаунта?{" "}
