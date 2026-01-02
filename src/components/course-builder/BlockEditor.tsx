@@ -20,6 +20,8 @@ import {
   Underline as UnderlineIcon,
   Link as LinkIcon,
   Image as ImageIcon,
+  Video,
+  Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,6 +49,7 @@ export type BlockType =
   | "quiz"
   | "term"
   | "image"
+  | "video"
   | "table";
 
 export interface QuizOption {
@@ -71,6 +74,8 @@ export interface ContentBlock {
   // For image
   imageSrc?: string;
   imageAlt?: string;
+  // For video
+  videoUrl?: string;
   // For table (raw HTML)
   tableHtml?: string;
 }
@@ -95,6 +100,7 @@ const blockTypeConfig: Record<BlockType, { icon: any; label: string; color: stri
   quiz: { icon: HelpCircle, label: "Мини-квиз", color: "text-primary" },
   term: { icon: BookOpen, label: "Термин", color: "text-cyan-500" },
   image: { icon: ImageIcon, label: "Изображение", color: "text-green-500" },
+  video: { icon: Video, label: "Видео", color: "text-red-500" },
   table: { icon: Type, label: "Таблица", color: "text-blue-500" },
 };
 
@@ -113,6 +119,7 @@ const createBlock = (type: BlockType): ContentBlock => ({
   }),
   ...(type === "term" && { termWord: "", termDefinition: "" }),
   ...(type === "image" && { imageSrc: "", imageAlt: "" }),
+  ...(type === "video" && { videoUrl: "" }),
   ...(type === "table" && { tableHtml: "" }),
 });
 
@@ -245,6 +252,15 @@ function AddBlockButton({ onAdd }: { onAdd: (type: BlockType) => void }) {
         <DropdownMenuItem onClick={() => onAdd("term")}>
           <BookOpen className="w-4 h-4 mr-2 text-cyan-500" />
           Термин с пояснением
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => onAdd("image")}>
+          <ImageIcon className="w-4 h-4 mr-2 text-green-500" />
+          Изображение
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onAdd("video")}>
+          <Video className="w-4 h-4 mr-2 text-red-500" />
+          Видео
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -436,6 +452,9 @@ function BlockContent({ block, onUpdate }: { block: ContentBlock; onUpdate: (upd
     case "image":
       return <ImageBlock block={block} onUpdate={onUpdate} />;
 
+    case "video":
+      return <VideoBlock block={block} onUpdate={onUpdate} />;
+
     case "table":
       return <TableBlock block={block} onUpdate={onUpdate} />;
 
@@ -444,17 +463,38 @@ function BlockContent({ block, onUpdate }: { block: ContentBlock; onUpdate: (upd
   }
 }
 
-// Image Block
+// Image Block with URL and file upload
 function ImageBlock({ block, onUpdate }: { block: ContentBlock; onUpdate: (updates: Partial<ContentBlock>) => void }) {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        onUpdate({ imageSrc: event.target?.result as string });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   return (
     <div className="py-2">
       {block.imageSrc ? (
         <div className="space-y-2">
-          <img 
-            src={block.imageSrc} 
-            alt={block.imageAlt || ""} 
-            className="rounded-lg max-w-full h-auto max-h-[400px] object-contain"
-          />
+          <div className="relative group/img">
+            <img 
+              src={block.imageSrc} 
+              alt={block.imageAlt || ""} 
+              className="rounded-lg max-w-full h-auto max-h-[400px] object-contain"
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              className="absolute top-2 right-2 opacity-0 group-hover/img:opacity-100 transition-opacity"
+              onClick={() => onUpdate({ imageSrc: "", imageAlt: "" })}
+            >
+              Удалить
+            </Button>
+          </div>
           <Input
             value={block.imageAlt || ""}
             onChange={(e) => onUpdate({ imageAlt: e.target.value })}
@@ -463,15 +503,110 @@ function ImageBlock({ block, onUpdate }: { block: ContentBlock; onUpdate: (updat
           />
         </div>
       ) : (
-        <div className="bg-muted rounded-xl p-8 text-center">
-          <ImageIcon className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground mb-2">Изображение не загружено</p>
+        <div className="bg-muted rounded-xl p-6 space-y-4">
+          <div className="text-center">
+            <ImageIcon className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground mb-4">Добавьте изображение</p>
+          </div>
+          
+          {/* URL input */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground">По ссылке</label>
+            <Input
+              value={block.imageSrc || ""}
+              onChange={(e) => onUpdate({ imageSrc: e.target.value })}
+              placeholder="https://example.com/image.jpg"
+              className="text-sm"
+            />
+          </div>
+          
+          {/* File upload */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground">Или загрузите файл</label>
+            <label className="flex items-center justify-center gap-2 p-3 border-2 border-dashed border-border rounded-lg cursor-pointer hover:bg-secondary/50 transition-colors">
+              <Upload className="w-4 h-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Выберите файл</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </label>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Video Block (URL only)
+function VideoBlock({ block, onUpdate }: { block: ContentBlock; onUpdate: (updates: Partial<ContentBlock>) => void }) {
+  // Extract video embed URL
+  const getEmbedUrl = (url: string): string | null => {
+    if (!url) return null;
+    
+    // YouTube
+    const ytMatch = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/);
+    if (ytMatch) return `https://www.youtube.com/embed/${ytMatch[1]}`;
+    
+    // Vimeo
+    const vimeoMatch = url.match(/vimeo\.com\/(\d+)/);
+    if (vimeoMatch) return `https://player.vimeo.com/video/${vimeoMatch[1]}`;
+    
+    // Rutube
+    const rutubeMatch = url.match(/rutube\.ru\/video\/([a-zA-Z0-9]+)/);
+    if (rutubeMatch) return `https://rutube.ru/play/embed/${rutubeMatch[1]}`;
+    
+    // VK Video
+    const vkMatch = url.match(/vk\.com\/video(-?\d+)_(\d+)/);
+    if (vkMatch) return `https://vk.com/video_ext.php?oid=${vkMatch[1]}&id=${vkMatch[2]}`;
+    
+    return null;
+  };
+
+  const embedUrl = getEmbedUrl(block.videoUrl || "");
+
+  return (
+    <div className="py-2">
+      {embedUrl ? (
+        <div className="space-y-2">
+          <div className="relative group/video aspect-video bg-black rounded-lg overflow-hidden">
+            <iframe
+              src={embedUrl}
+              className="w-full h-full"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              className="absolute top-2 right-2 opacity-0 group-hover/video:opacity-100 transition-opacity"
+              onClick={() => onUpdate({ videoUrl: "" })}
+            >
+              Удалить
+            </Button>
+          </div>
           <Input
-            value={block.imageSrc || ""}
-            onChange={(e) => onUpdate({ imageSrc: e.target.value })}
-            placeholder="URL изображения..."
+            value={block.videoUrl || ""}
+            onChange={(e) => onUpdate({ videoUrl: e.target.value })}
+            placeholder="Ссылка на видео..."
+            className="text-sm border-0 bg-secondary/30 focus-visible:ring-1 rounded-lg"
+          />
+        </div>
+      ) : (
+        <div className="bg-muted rounded-xl p-6 text-center">
+          <Video className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground mb-4">Добавьте видео по ссылке</p>
+          <Input
+            value={block.videoUrl || ""}
+            onChange={(e) => onUpdate({ videoUrl: e.target.value })}
+            placeholder="YouTube, Vimeo, Rutube или VK Video..."
             className="text-sm"
           />
+          <p className="text-xs text-muted-foreground mt-2">
+            Поддерживаются: YouTube, Vimeo, Rutube, VK Video
+          </p>
         </div>
       )}
     </div>
@@ -861,6 +996,40 @@ function RenderBlock({
           )}
           {block.imageAlt && (
             <p className="text-sm text-muted-foreground mt-2 text-center italic">{block.imageAlt}</p>
+          )}
+        </div>
+      );
+
+    case "video":
+      const getEmbedUrlRender = (url: string): string | null => {
+        if (!url) return null;
+        const ytMatch = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]+)/);
+        if (ytMatch) return `https://www.youtube.com/embed/${ytMatch[1]}`;
+        const vimeoMatch = url.match(/vimeo\.com\/(\d+)/);
+        if (vimeoMatch) return `https://player.vimeo.com/video/${vimeoMatch[1]}`;
+        const rutubeMatch = url.match(/rutube\.ru\/video\/([a-zA-Z0-9]+)/);
+        if (rutubeMatch) return `https://rutube.ru/play/embed/${rutubeMatch[1]}`;
+        const vkMatch = url.match(/vk\.com\/video(-?\d+)_(\d+)/);
+        if (vkMatch) return `https://vk.com/video_ext.php?oid=${vkMatch[1]}&id=${vkMatch[2]}`;
+        return null;
+      };
+      const videoEmbedUrl = getEmbedUrlRender(block.videoUrl || "");
+      return (
+        <div className="not-prose my-4">
+          {videoEmbedUrl ? (
+            <div className="aspect-video bg-black rounded-lg overflow-hidden">
+              <iframe
+                src={videoEmbedUrl}
+                className="w-full h-full"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            </div>
+          ) : (
+            <div className="bg-muted rounded-lg p-8 text-center text-muted-foreground">
+              <Video className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">Видео не добавлено</p>
+            </div>
           )}
         </div>
       );
