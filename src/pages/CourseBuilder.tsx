@@ -70,16 +70,19 @@ export default function CourseBuilder() {
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Import course from file - 1 file = 1 lesson
+  // Import multiple files - each file = 1 lesson
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
     setIsImporting(true);
 
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      // Append all files
+      for (let i = 0; i < files.length; i++) {
+        formData.append(`file_${i}`, files[i]);
+      }
 
       const response = await fetch(
         `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/import-course`,
@@ -95,38 +98,42 @@ export default function CourseBuilder() {
         throw new Error(data.error || 'Ошибка импорта');
       }
 
-      // Set course title from file name if no title set
-      const fileName = file.name.replace(/\.[^/.]+$/, ""); // Remove extension
-      if (!courseTitle) {
-        setCourseTitle(data.courseTitle || fileName);
+      // Set course title if not set
+      if (!courseTitle && data.courseTitle) {
+        setCourseTitle(data.courseTitle);
       }
 
-      // Combine all sections from file into one lesson with all blocks
-      const allBlocks: ContentBlock[] = [];
-      
-      data.lessons.forEach((l: any) => {
+      // Create lessons from each file
+      const importedLessons: Lesson[] = data.lessons.map((l: any) => {
         const blocks = htmlToBlocks(l.content || "");
-        allBlocks.push(...blocks);
+        return {
+          id: l.id,
+          type: "text" as LessonType,
+          title: l.title,
+          content: blocksToJson(blocks),
+          blocks: blocks,
+          expanded: false,
+        };
       });
 
-      // Create single lesson from file
-      const newLesson: Lesson = {
-        id: crypto.randomUUID(),
-        type: "text" as LessonType,
-        title: data.courseTitle || fileName,
-        content: blocksToJson(allBlocks),
-        blocks: allBlocks,
-        expanded: true, // Expand to show content
-      };
-
-      setLessons(prev => [...prev, newLesson]);
-      toast.success(`Лекция "${newLesson.title}" импортирована (${allBlocks.length} блоков)`);
+      setLessons(prev => [...prev, ...importedLessons]);
+      
+      // Show analysis info
+      const analysisInfo = data.analysis?.map((a: any) => 
+        `${a.title} (${a.wordCount} слов, ${a.contentType})`
+      ).join('\n');
+      
+      toast.success(
+        `Импортировано ${importedLessons.length} ${importedLessons.length === 1 ? 'лекция' : importedLessons.length < 5 ? 'лекции' : 'лекций'}`,
+        { description: files.length > 1 ? 'Файлы упорядочены по структуре' : undefined }
+      );
+      
+      console.log('Import analysis:', data.analysis);
     } catch (error: any) {
       console.error('Import error:', error);
       toast.error(error.message || 'Ошибка импорта файла');
     } finally {
       setIsImporting(false);
-      // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -472,9 +479,9 @@ export default function CourseBuilder() {
                   <FileUp className="w-6 h-6 text-white" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-display font-semibold text-lg mb-1">Импорт лекции из файла</h3>
+                  <h3 className="font-display font-semibold text-lg mb-1">Импорт лекций из файлов</h3>
                   <p className="text-muted-foreground text-sm mb-2">
-                    Загрузите DOC, DOCX, HTML или TXT — стили и таблицы сохранятся
+                    Загрузите несколько DOC, DOCX, HTML или TXT — каждый файл станет отдельной лекцией
                   </p>
                   {lessons.length > 0 && (
                     <p className="text-xs text-primary mb-3">
@@ -486,6 +493,7 @@ export default function CourseBuilder() {
                     type="file"
                     accept=".doc,.docx,.html,.htm,.txt"
                     onChange={handleFileImport}
+                    multiple
                     className="hidden"
                   />
                   <Button 
