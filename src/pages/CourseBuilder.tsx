@@ -288,6 +288,86 @@ export default function CourseBuilder() {
     }
   };
 
+  // Save single lesson (creates course if needed)
+  const saveSingleLesson = async (lesson: Lesson, orderIndex: number) => {
+    if (!organizationId) {
+      toast.error("Не найдена организация");
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      let savedCourseId = courseId;
+
+      // Create course if it doesn't exist
+      if (!savedCourseId) {
+        if (!courseTitle.trim()) {
+          setCourseTitle(lesson.title || "Новый курс");
+        }
+        
+        const { data: newCourse, error } = await supabase
+          .from("courses")
+          .insert({
+            title: courseTitle.trim() || lesson.title || "Новый курс",
+            description: courseDescription.trim() || null,
+            organization_id: organizationId,
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+        savedCourseId = newCourse.id;
+        
+        // Update URL without navigation to keep state
+        window.history.replaceState(null, '', `/course-builder/${savedCourseId}`);
+      }
+
+      // Check if lesson exists in DB
+      const { data: existingLesson } = await supabase
+        .from("lessons")
+        .select("id")
+        .eq("id", lesson.id)
+        .maybeSingle();
+
+      if (existingLesson) {
+        // Update existing lesson
+        const { error } = await supabase
+          .from("lessons")
+          .update({
+            title: lesson.title,
+            type: lesson.type,
+            content: lesson.content || null,
+            order_index: orderIndex,
+          })
+          .eq("id", lesson.id);
+
+        if (error) throw error;
+        toast.success("Лекция обновлена");
+      } else {
+        // Insert new lesson
+        const { error } = await supabase
+          .from("lessons")
+          .insert({
+            id: lesson.id,
+            course_id: savedCourseId,
+            title: lesson.title,
+            type: lesson.type,
+            content: lesson.content || null,
+            order_index: orderIndex,
+          });
+
+        if (error) throw error;
+        toast.success("Лекция сохранена");
+      }
+    } catch (error: any) {
+      console.error("Error saving lesson:", error);
+      toast.error("Ошибка сохранения: " + error.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const generateWithAI = async () => {
     if (!courseTitle) return;
     setIsGenerating(true);
@@ -386,10 +466,15 @@ export default function CourseBuilder() {
                   <FileUp className="w-6 h-6 text-white" />
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-display font-semibold text-lg mb-1">Импорт из файла</h3>
-                  <p className="text-muted-foreground text-sm mb-4">
-                    Загрузите DOC, DOCX, HTML или TXT файл — сохраняются стили, таблицы и изображения
+                  <h3 className="font-display font-semibold text-lg mb-1">Импорт лекции из файла</h3>
+                  <p className="text-muted-foreground text-sm mb-2">
+                    Загрузите DOC, DOCX, HTML или TXT — стили и таблицы сохранятся
                   </p>
+                  {lessons.length > 0 && (
+                    <p className="text-xs text-primary mb-3">
+                      ✓ Загружено {lessons.length} {lessons.length === 1 ? 'лекция' : lessons.length < 5 ? 'лекции' : 'лекций'} — можете добавить ещё
+                    </p>
+                  )}
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -404,7 +489,7 @@ export default function CourseBuilder() {
                     variant="outline"
                   >
                     {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileUp className="w-4 h-4" />}
-                    {isImporting ? "Импорт..." : "Загрузить файл"}
+                    {isImporting ? "Импорт..." : lessons.length > 0 ? "Загрузить ещё файл" : "Загрузить файл"}
                   </Button>
                 </div>
               </div>
@@ -467,6 +552,18 @@ export default function CourseBuilder() {
                             onClick={(e) => e.stopPropagation()}
                             className="flex-1 border-0 bg-transparent focus-visible:ring-0 px-0"
                           />
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              saveSingleLesson(lesson, index);
+                            }}
+                            className="text-primary hover:text-primary gap-1"
+                          >
+                            <Save className="w-3 h-3" />
+                            <span className="hidden sm:inline">Сохранить</span>
+                          </Button>
                           <Button 
                             variant="ghost" 
                             size="sm"
