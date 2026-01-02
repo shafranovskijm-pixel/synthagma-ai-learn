@@ -62,13 +62,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .from('user_roles')
         .select('role')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
       
       if (error) {
         console.error('Error fetching user role:', error);
         setRole('student'); // Default to student on error
       } else {
-        setRole(data?.role as AppRole ?? 'student');
+        setRole((data?.role as AppRole) ?? 'student');
       }
     } catch (err) {
       console.error('Error fetching user role:', err);
@@ -88,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = async (email: string, password: string, fullName?: string, registrationType?: 'organization' | 'student') => {
     const redirectUrl = `${window.location.origin}/`;
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -99,7 +99,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         },
       },
     });
-    return { error: error as Error | null };
+
+    if (error) return { error: error as Error };
+
+    // If we have a session, finalize profile/role/org creation immediately
+    if (data.session) {
+      const { error: setupError } = await supabase.functions.invoke('complete-signup', {
+        body: {
+          full_name: fullName || '',
+          registration_type: registrationType || 'student',
+        },
+      });
+
+      if (setupError) {
+        return { error: setupError as unknown as Error };
+      }
+
+      if (data.user?.id) {
+        // Ensure client state sees the updated role for correct redirect
+        await fetchUserRole(data.user.id);
+      }
+    }
+
+    return { error: null };
   };
 
   const signOut = async () => {
