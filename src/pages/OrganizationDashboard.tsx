@@ -33,6 +33,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
@@ -95,6 +102,9 @@ export default function OrganizationDashboard() {
   const [showAddStudentDialog, setShowAddStudentDialog] = useState(false);
   const [courses, setCourses] = useState<Course[]>([]);
   const [isLoadingCourses, setIsLoadingCourses] = useState(true);
+  const [newStudentName, setNewStudentName] = useState("");
+  const [newStudentEmail, setNewStudentEmail] = useState("");
+  const [selectedCourseId, setSelectedCourseId] = useState<string>("");
 
   // Fetch courses from database
   useEffect(() => {
@@ -302,15 +312,42 @@ export default function OrganizationDashboard() {
                       <div className="space-y-4 py-4">
                         <div className="space-y-2">
                           <Label>ФИО</Label>
-                          <Input placeholder="Иванов Иван Иванович" className="rounded-xl" />
+                          <Input 
+                            placeholder="Иванов Иван Иванович" 
+                            className="rounded-xl"
+                            value={newStudentName}
+                            onChange={(e) => setNewStudentName(e.target.value)}
+                          />
                         </div>
                         <div className="space-y-2">
                           <Label>Email</Label>
-                          <Input type="email" placeholder="ivanov@mail.ru" className="rounded-xl" />
+                          <Input 
+                            type="email" 
+                            placeholder="ivanov@mail.ru" 
+                            className="rounded-xl"
+                            value={newStudentEmail}
+                            onChange={(e) => setNewStudentEmail(e.target.value)}
+                          />
                         </div>
                         <div className="space-y-2">
                           <Label>Курс</Label>
-                          <Input placeholder="Выберите курс" className="rounded-xl" />
+                          <Select value={selectedCourseId} onValueChange={setSelectedCourseId}>
+                            <SelectTrigger className="rounded-xl">
+                              <SelectValue placeholder="Выберите курс" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {courses.map((course) => (
+                                <SelectItem key={course.id} value={course.id}>
+                                  {course.title}
+                                </SelectItem>
+                              ))}
+                              {courses.length === 0 && (
+                                <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                                  Нет доступных курсов
+                                </div>
+                              )}
+                            </SelectContent>
+                          </Select>
                         </div>
                         <Button className="w-full btn-gradient rounded-xl">
                           Создать и отправить доступ
