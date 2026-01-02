@@ -70,7 +70,7 @@ export default function CourseBuilder() {
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Import course from file
+  // Import course from file - 1 file = 1 lesson
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -95,26 +95,32 @@ export default function CourseBuilder() {
         throw new Error(data.error || 'Ошибка импорта');
       }
 
-      // Set course title from file
-      if (data.courseTitle && !courseTitle) {
-        setCourseTitle(data.courseTitle);
+      // Set course title from file name if no title set
+      const fileName = file.name.replace(/\.[^/.]+$/, ""); // Remove extension
+      if (!courseTitle) {
+        setCourseTitle(data.courseTitle || fileName);
       }
 
-      // Add imported lessons - convert HTML to blocks
-      const importedLessons: Lesson[] = data.lessons.map((l: any) => {
+      // Combine all sections from file into one lesson with all blocks
+      const allBlocks: ContentBlock[] = [];
+      
+      data.lessons.forEach((l: any) => {
         const blocks = htmlToBlocks(l.content || "");
-        return {
-          id: l.id,
-          type: l.type as LessonType,
-          title: l.title,
-          content: blocksToJson(blocks), // Store as JSON
-          blocks: blocks,
-          expanded: false,
-        };
+        allBlocks.push(...blocks);
       });
 
-      setLessons(prev => [...prev, ...importedLessons]);
-      toast.success(`Импортировано ${data.sectionsCount} разделов`);
+      // Create single lesson from file
+      const newLesson: Lesson = {
+        id: crypto.randomUUID(),
+        type: "text" as LessonType,
+        title: data.courseTitle || fileName,
+        content: blocksToJson(allBlocks),
+        blocks: allBlocks,
+        expanded: true, // Expand to show content
+      };
+
+      setLessons(prev => [...prev, newLesson]);
+      toast.success(`Лекция "${newLesson.title}" импортирована (${allBlocks.length} блоков)`);
     } catch (error: any) {
       console.error('Import error:', error);
       toast.error(error.message || 'Ошибка импорта файла');
