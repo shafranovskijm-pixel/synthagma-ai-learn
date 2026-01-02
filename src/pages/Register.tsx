@@ -60,7 +60,7 @@ export default function Register() {
 
     setIsLoading(true);
     
-    const { error } = await signUp(email, password, fullName);
+    const { error } = await signUp(email, password, fullName, type);
     
     if (error) {
       let errorMessage = error.message;
