@@ -150,14 +150,22 @@ export default function CourseBuilder() {
       if (!user) return;
 
       // Get organization ID from profile
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("organization_id")
         .eq("user_id", user.id)
         .single();
 
+      console.log("Profile fetch result:", { profile, profileError, userId: user.id });
+
       if (profile?.organization_id) {
         setOrganizationId(profile.organization_id);
+      } else {
+        console.error("Organization ID not found in profile");
+        // Don't block loading for editing
+        if (!courseId) {
+          setIsLoading(false);
+        }
       }
 
       // If editing existing course, fetch course data
@@ -171,6 +179,10 @@ export default function CourseBuilder() {
         if (course) {
           setCourseTitle(course.title);
           setCourseDescription(course.description || "");
+          // Also get organization_id from the course if profile didn't have it
+          if (!profile?.organization_id && course.organization_id) {
+            setOrganizationId(course.organization_id);
+          }
         }
 
         // Fetch lessons
@@ -193,6 +205,8 @@ export default function CourseBuilder() {
             };
           }));
         }
+        setIsLoading(false);
+      } else {
         setIsLoading(false);
       }
     };
