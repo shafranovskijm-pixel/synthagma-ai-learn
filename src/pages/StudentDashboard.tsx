@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { SigmaLogo } from "@/components/ui/SigmaLogo";
+import { supabase } from "@/integrations/supabase/client";
 import { 
   BookOpen, 
   MessageCircle, 
@@ -13,50 +14,122 @@ import {
   CheckCircle2,
   Lock,
   Send,
-  Sparkles
+  Sparkles,
+  Loader2
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 
-const courses = [
-  { 
-    id: 1, 
-    title: "Основы безопасности", 
-    progress: 75,
-    totalLessons: 12,
-    completedLessons: 9,
-    duration: "8 часов",
-    status: "in_progress"
-  },
-  { 
-    id: 2, 
-    title: "Пожарная безопасность", 
-    progress: 100,
-    totalLessons: 8,
-    completedLessons: 8,
-    duration: "6 часов",
-    status: "completed"
-  },
-  { 
-    id: 3, 
-    title: "Охрана труда", 
-    progress: 0,
-    totalLessons: 15,
-    completedLessons: 0,
-    duration: "10 часов",
-    status: "locked"
-  },
-];
+interface Course {
+  id: string;
+  title: string;
+  description: string | null;
+  duration: string | null;
+  progress: number;
+  totalLessons: number;
+  completedLessons: number;
+  status: "in_progress" | "completed" | "locked";
+}
+
+interface Profile {
+  full_name: string | null;
+  organization_name: string | null;
+}
 
 const aiMessages = [
   { role: "assistant", content: "Привет! Я ИИ-помощник платформы СИНТАГМА. Чем могу помочь с обучением?" },
 ];
 
 export default function StudentDashboard() {
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<"courses" | "chat">("courses");
   const [messages, setMessages] = useState(aiMessages);
   const [inputValue, setInputValue] = useState("");
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (user) {
+      loadData();
+    }
+  }, [user]);
+
+  const loadData = async () => {
+    if (!user) return;
+    setLoading(true);
+
+    try {
+      // Load profile with organization
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("full_name, organization_id, organizations(name)")
+        .eq("user_id", user.id)
+        .single();
+
+      if (profileData) {
+        setProfile({
+          full_name: profileData.full_name,
+          organization_name: (profileData.organizations as any)?.name || null
+        });
+      }
+
+      // Load enrollments with courses
+      const { data: enrollments } = await supabase
+        .from("enrollments")
+        .select(`
+          id,
+          progress,
+          status,
+          course_id,
+          courses(id, title, description, duration)
+        `)
+        .eq("user_id", user.id);
+
+      if (enrollments) {
+        const coursesData: Course[] = [];
+        
+        for (const enrollment of enrollments) {
+          const course = enrollment.courses as any;
+          if (!course) continue;
+
+          // Get lesson count
+          const { count: totalLessons } = await supabase
+            .from("lessons")
+            .select("id", { count: "exact", head: true })
+            .eq("course_id", course.id);
+
+          // Get completed lessons count
+          const { count: completedLessons } = await supabase
+            .from("lesson_progress")
+            .select("id", { count: "exact", head: true })
+            .eq("user_id", user.id)
+            .in("lesson_id", 
+              (await supabase.from("lessons").select("id").eq("course_id", course.id)).data?.map(l => l.id) || []
+            )
+            .eq("completed", true);
+
+          coursesData.push({
+            id: course.id,
+            title: course.title,
+            description: course.description,
+            duration: course.duration,
+            progress: enrollment.progress || 0,
+            totalLessons: totalLessons || 0,
+            completedLessons: completedLessons || 0,
+            status: enrollment.status === "completed" ? "completed" : 
+                   enrollment.progress > 0 ? "in_progress" : "in_progress"
+          });
+        }
+        
+        setCourses(coursesData);
+      }
+    } catch (error) {
+      console.error("Error loading data:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogout = async () => {
     await signOut();
@@ -68,18 +141,27 @@ export default function StudentDashboard() {
     setMessages(prev => [...prev, { role: "user", content: inputValue }]);
     setInputValue("");
     
-    // Simulate AI response
     setTimeout(() => {
       setMessages(prev => [...prev, { 
         role: "assistant", 
-        content: "Спасибо за ваш вопрос! Я анализирую материалы курса... Вот что я могу сказать: это важный аспект обучения, который требует внимательного изучения. Рекомендую обратить внимание на раздел 3 урока 5, там подробно разбирается эта тема. Есть ещё вопросы?" 
+        content: "Спасибо за ваш вопрос! Я анализирую материалы курса... Вот что я могу сказать: это важный аспект обучения, который требует внимательного изучения." 
       }]);
     }, 1500);
   };
 
-  const totalProgress = Math.round(
-    courses.reduce((acc, c) => acc + c.progress, 0) / courses.length
-  );
+  const totalProgress = courses.length > 0 
+    ? Math.round(courses.reduce((acc, c) => acc + c.progress, 0) / courses.length)
+    : 0;
+  
+  const firstName = profile?.full_name?.split(" ")[0] || "Ученик";
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -88,8 +170,8 @@ export default function StudentDashboard() {
         <div className="p-6 border-b border-border">
           <SigmaLogo size="md" />
           <div className="mt-4 p-3 bg-secondary rounded-xl">
-            <div className="font-semibold text-sm">Петров Петр</div>
-            <div className="text-xs text-muted-foreground">УЦ СТАТУС</div>
+            <div className="font-semibold text-sm">{profile?.full_name || "Ученик"}</div>
+            <div className="text-xs text-muted-foreground">{profile?.organization_name || "Организация"}</div>
           </div>
         </div>
         
@@ -148,7 +230,7 @@ export default function StudentDashboard() {
             <header className="bg-card border-b border-border px-8 py-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="font-display text-2xl font-bold">Добро пожаловать, Петр!</h1>
+                  <h1 className="font-display text-2xl font-bold">Добро пожаловать, {firstName}!</h1>
                   <p className="text-muted-foreground">Продолжайте обучение</p>
                 </div>
               </div>
