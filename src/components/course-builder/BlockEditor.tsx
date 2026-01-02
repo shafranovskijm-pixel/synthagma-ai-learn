@@ -45,7 +45,9 @@ export type BlockType =
   | "callout-tip"
   | "accordion"
   | "quiz"
-  | "term";
+  | "term"
+  | "image"
+  | "table";
 
 export interface QuizOption {
   text: string;
@@ -66,6 +68,11 @@ export interface ContentBlock {
   // For term
   termWord?: string;
   termDefinition?: string;
+  // For image
+  imageSrc?: string;
+  imageAlt?: string;
+  // For table (raw HTML)
+  tableHtml?: string;
 }
 
 interface BlockEditorProps {
@@ -87,6 +94,8 @@ const blockTypeConfig: Record<BlockType, { icon: any; label: string; color: stri
   accordion: { icon: ChevronDown, label: "Сворачиваемая секция", color: "text-purple-500" },
   quiz: { icon: HelpCircle, label: "Мини-квиз", color: "text-primary" },
   term: { icon: BookOpen, label: "Термин", color: "text-cyan-500" },
+  image: { icon: ImageIcon, label: "Изображение", color: "text-green-500" },
+  table: { icon: Type, label: "Таблица", color: "text-blue-500" },
 };
 
 const createBlock = (type: BlockType): ContentBlock => ({
@@ -103,6 +112,8 @@ const createBlock = (type: BlockType): ContentBlock => ({
     quizExplanation: ""
   }),
   ...(type === "term" && { termWord: "", termDefinition: "" }),
+  ...(type === "image" && { imageSrc: "", imageAlt: "" }),
+  ...(type === "table" && { tableHtml: "" }),
 });
 
 export function BlockEditor({ blocks, onChange, readOnly = false }: BlockEditorProps) {
@@ -746,6 +757,37 @@ function RenderBlock({
         </div>
       );
 
+    case "image":
+      return (
+        <div className="not-prose my-4">
+          {block.imageSrc ? (
+            <img 
+              src={block.imageSrc} 
+              alt={block.imageAlt || ""} 
+              className="rounded-lg max-w-full h-auto"
+            />
+          ) : (
+            <div className="bg-muted rounded-lg p-8 text-center text-muted-foreground">
+              <ImageIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">Изображение не загружено</p>
+            </div>
+          )}
+          {block.imageAlt && (
+            <p className="text-sm text-muted-foreground mt-2 text-center italic">{block.imageAlt}</p>
+          )}
+        </div>
+      );
+
+    case "table":
+      return (
+        <div className="not-prose my-4 overflow-x-auto">
+          <div 
+            className="min-w-full [&_table]:min-w-full [&_table]:text-sm [&_table]:border [&_table]:border-border [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:bg-muted [&_th]:font-semibold"
+            dangerouslySetInnerHTML={{ __html: block.tableHtml || "" }}
+          />
+        </div>
+      );
+
     default:
       return null;
   }
@@ -781,35 +823,62 @@ export function htmlToBlocks(html: string): ContentBlock[] {
         blocks.push({ ...createBlock("heading2"), content: el.textContent || "" });
         break;
       case "p":
-        blocks.push({ ...createBlock("paragraph"), content: el.textContent || "" });
+        // Check if paragraph contains only an image
+        const imgInP = el.querySelector("img");
+        if (imgInP && el.childNodes.length === 1) {
+          blocks.push({ 
+            ...createBlock("image"), 
+            imageSrc: imgInP.getAttribute("src") || "",
+            imageAlt: imgInP.getAttribute("alt") || "",
+          });
+        } else {
+          // Keep innerHTML to preserve inline formatting (bold, italic, etc.)
+          blocks.push({ ...createBlock("paragraph"), content: el.innerHTML || "" });
+        }
         break;
       case "ul":
-        const bulletItems = Array.from(el.querySelectorAll("li")).map(li => li.textContent || "").join("\n");
+        const bulletItems = Array.from(el.querySelectorAll(":scope > li")).map(li => li.innerHTML || "").join("\n");
         blocks.push({ ...createBlock("bulletList"), content: bulletItems });
         break;
       case "ol":
-        const numberedItems = Array.from(el.querySelectorAll("li")).map(li => li.textContent || "").join("\n");
+        const numberedItems = Array.from(el.querySelectorAll(":scope > li")).map(li => li.innerHTML || "").join("\n");
         blocks.push({ ...createBlock("numberedList"), content: numberedItems });
         break;
       case "blockquote":
-        blocks.push({ ...createBlock("quote"), content: el.textContent || "" });
+        blocks.push({ ...createBlock("quote"), content: el.innerHTML || "" });
+        break;
+      case "img":
+        // Standalone image
+        blocks.push({ 
+          ...createBlock("image"), 
+          imageSrc: el.getAttribute("src") || "",
+          imageAlt: el.getAttribute("alt") || "",
+        });
         break;
       case "table":
-        // Convert table to paragraph with formatted text
-        const tableText = Array.from(el.querySelectorAll("tr")).map(row => 
-          Array.from(row.querySelectorAll("td, th")).map(cell => cell.textContent).join(" | ")
-        ).join("\n");
-        blocks.push({ ...createBlock("paragraph"), content: tableText });
+        // Preserve table as HTML for proper rendering
+        blocks.push({ 
+          ...createBlock("table"), 
+          tableHtml: el.outerHTML,
+          content: "", // Keep content empty, tableHtml has the data
+        });
+        break;
+      case "div":
+      case "section":
+      case "article":
+      case "span":
+        // Process children for container elements
+        el.childNodes.forEach(processNode);
         break;
       default:
-        // Process children
+        // Process children for unknown elements
         el.childNodes.forEach(processNode);
     }
   };
 
   doc.body.childNodes.forEach(processNode);
   
-  return blocks.filter(b => b.content || b.type === "quiz" || b.type === "accordion" || b.type === "term");
+  return blocks.filter(b => b.content || b.tableHtml || b.imageSrc || b.type === "quiz" || b.type === "accordion" || b.type === "term" || b.type === "image" || b.type === "table");
 }
 
 // Utility to convert blocks to JSON for storage
