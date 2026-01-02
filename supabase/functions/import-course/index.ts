@@ -7,6 +7,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Hard limit to avoid CPU/worker limits when parsing many DOCX files in one request
+const MAX_FILES_PER_REQUEST = 3;
+
 // Convert plain text to HTML paragraphs
 function txtToHtml(text: string): string {
   const escapeHtml = (s: string) => 
@@ -321,6 +324,16 @@ serve(async (req) => {
       );
     }
 
+    if (files.length > MAX_FILES_PER_REQUEST) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: `Слишком много файлов за раз (${files.length}). Загрузите максимум ${MAX_FILES_PER_REQUEST} файлов за один импорт.`,
+        }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     console.log(`Processing ${files.length} files`);
 
     // Process files SEQUENTIALLY to avoid CPU timeout
@@ -350,28 +363,23 @@ serve(async (req) => {
     // Analyze and organize content structure
     const analyzedFiles = analyzeContentStructure(validFiles);
 
-    // Create lessons - 1 file = 1 lesson with all its sections combined
-    const lessons = analyzedFiles.map((file, index) => {
-      // Split into sections but keep them as one lesson
-      const sections = splitIntoSections(file.html, 8000);
-      const combinedHtml = sections.map(s => s.html).join('\n');
-      
-      return {
-        id: crypto.randomUUID(),
-        type: 'text',
-        title: file.title,
-        content: combinedHtml,
-        order_index: index,
-        metadata: {
-          wordCount: file.wordCount,
-          contentType: file.contentType,
-          hasHeadings: file.hasHeadings,
-          hasTables: file.hasTables,
-          hasImages: file.hasImages,
-          fileName: file.fileName,
-        }
-      };
-    });
+    // Create lessons - 1 file = 1 lesson
+    // Important: do NOT split again here (DOCX->HTML is the heavy part); keep processing minimal.
+    const lessons = analyzedFiles.map((file, index) => ({
+      id: crypto.randomUUID(),
+      type: 'text',
+      title: file.title,
+      content: file.html,
+      order_index: index,
+      metadata: {
+        wordCount: file.wordCount,
+        contentType: file.contentType,
+        hasHeadings: file.hasHeadings,
+        hasTables: file.hasTables,
+        hasImages: file.hasImages,
+        fileName: file.fileName,
+      },
+    }));
 
     // Suggest course title based on common prefix or first file
     let suggestedCourseTitle = '';

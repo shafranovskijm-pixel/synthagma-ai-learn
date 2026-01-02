@@ -70,68 +70,72 @@ export default function CourseBuilder() {
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Import multiple files - each file = 1 lesson
+  // Import multiple files - chunked to avoid backend worker limits
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    const CHUNK_SIZE = 3;
+
+    // Sort files (by number in name, then alphabetically) to keep a sensible course order
+    const allFiles = Array.from(fileList).sort((a, b) => {
+      const na = a.name.match(/(\d+(?:[\.,]\d+)*)/)?.[1];
+      const nb = b.name.match(/(\d+(?:[\.,]\d+)*)/)?.[1];
+      if (na && nb) return na.localeCompare(nb, 'ru', { numeric: true });
+      return a.name.localeCompare(b.name, 'ru', { numeric: true });
+    });
 
     setIsImporting(true);
 
     try {
-      const formData = new FormData();
-      // Append all files
-      for (let i = 0; i < files.length; i++) {
-        formData.append(`file_${i}`, files[i]);
-      }
+      let totalImported = 0;
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/import-course`,
-        {
-          method: 'POST',
-          body: formData,
+      for (let offset = 0; offset < allFiles.length; offset += CHUNK_SIZE) {
+        const chunk = allFiles.slice(offset, offset + CHUNK_SIZE);
+
+        const formData = new FormData();
+        chunk.forEach((file, i) => formData.append(`file_${offset + i}`, file));
+
+        const response = await fetch(
+          `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/import-course`,
+          {
+            method: 'POST',
+            body: formData,
+          }
+        );
+
+        const data = await response.json();
+
+        if (!data.success) {
+          throw new Error(data.error || 'Ошибка импорта');
         }
-      );
 
-      const data = await response.json();
+        if (!courseTitle && data.courseTitle) {
+          setCourseTitle(data.courseTitle);
+        }
 
-      if (!data.success) {
-        throw new Error(data.error || 'Ошибка импорта');
+        const importedLessons: Lesson[] = (data.lessons || []).map((l: any) => {
+          const blocks = htmlToBlocks(l.content || "");
+          return {
+            id: l.id,
+            type: "text" as LessonType,
+            title: l.title,
+            content: blocksToJson(blocks),
+            blocks: blocks,
+            expanded: false,
+          };
+        });
+
+        totalImported += importedLessons.length;
+        setLessons((prev) => [...prev, ...importedLessons]);
       }
 
-      // Set course title if not set
-      if (!courseTitle && data.courseTitle) {
-        setCourseTitle(data.courseTitle);
-      }
-
-      // Create lessons from each file
-      const importedLessons: Lesson[] = data.lessons.map((l: any) => {
-        const blocks = htmlToBlocks(l.content || "");
-        return {
-          id: l.id,
-          type: "text" as LessonType,
-          title: l.title,
-          content: blocksToJson(blocks),
-          blocks: blocks,
-          expanded: false,
-        };
-      });
-
-      setLessons(prev => [...prev, ...importedLessons]);
-      
-      // Show analysis info
-      const analysisInfo = data.analysis?.map((a: any) => 
-        `${a.title} (${a.wordCount} слов, ${a.contentType})`
-      ).join('\n');
-      
       toast.success(
-        `Импортировано ${importedLessons.length} ${importedLessons.length === 1 ? 'лекция' : importedLessons.length < 5 ? 'лекции' : 'лекций'}`,
-        { description: files.length > 1 ? 'Файлы упорядочены по структуре' : undefined }
+        `Импортировано ${totalImported} ${totalImported === 1 ? 'лекция' : totalImported < 5 ? 'лекции' : 'лекций'}`
       );
-      
-      console.log('Import analysis:', data.analysis);
     } catch (error: any) {
       console.error('Import error:', error);
-      toast.error(error.message || 'Ошибка импорта файла');
+      toast.error(error.message || 'Ошибка импорта файлов');
     } finally {
       setIsImporting(false);
       if (fileInputRef.current) {
