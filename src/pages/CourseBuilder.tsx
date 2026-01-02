@@ -154,18 +154,14 @@ export default function CourseBuilder() {
         .from("profiles")
         .select("organization_id")
         .eq("user_id", user.id)
-        .single();
+        .maybeSingle();
 
-      console.log("Profile fetch result:", { profile, profileError, userId: user.id });
+      if (profileError) {
+        console.error("Profile fetch error:", profileError);
+      }
 
       if (profile?.organization_id) {
         setOrganizationId(profile.organization_id);
-      } else {
-        console.error("Organization ID not found in profile");
-        // Don't block loading for editing
-        if (!courseId) {
-          setIsLoading(false);
-        }
       }
 
       // If editing existing course, fetch course data
