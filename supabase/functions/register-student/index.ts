@@ -77,10 +77,16 @@ const handler = async (req: Request): Promise<Response> => {
 
     const userId = authData.user.id;
 
-    // Update profile with organization_id
+    // Wait a moment for the trigger to create profile and role
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Update profile with organization_id (trigger creates profile with student role)
     const { error: profileError } = await supabaseAdmin
       .from("profiles")
-      .update({ organization_id: link.organization_id })
+      .update({ 
+        organization_id: link.organization_id,
+        full_name: full_name 
+      })
       .eq("user_id", userId);
 
     if (profileError) {
@@ -92,6 +98,8 @@ const handler = async (req: Request): Promise<Response> => {
       .from("registration_links")
       .update({ used_count: (link.used_count || 0) + 1 })
       .eq("id", link.id);
+
+    console.log("Student registered successfully:", { userId, organizationId: link.organization_id });
 
     return new Response(
       JSON.stringify({ 
