@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,9 @@ import {
   TrendingUp,
   Clock,
   CheckCircle2,
-  XCircle
+  XCircle,
+  Loader2,
+  Edit
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -31,6 +33,19 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+
+interface Course {
+  id: string;
+  title: string;
+  description: string | null;
+  is_published: boolean;
+  created_at: string;
+  lessonsCount?: number;
+  studentsCount?: number;
+  duration?: string;
+}
 
 const students = [
   { 
@@ -71,20 +86,78 @@ const students = [
   },
 ];
 
-const courses = [
-  { id: 1, title: "Основы безопасности", studentsCount: 45, lessonsCount: 12, duration: "8 часов" },
-  { id: 2, title: "Пожарная безопасность", studentsCount: 38, lessonsCount: 8, duration: "6 часов" },
-  { id: 3, title: "Охрана труда", studentsCount: 52, lessonsCount: 15, duration: "10 часов" },
-  { id: 4, title: "Первая помощь", studentsCount: 21, lessonsCount: 6, duration: "4 часа" },
-];
-
 export default function OrganizationDashboard() {
   const navigate = useNavigate();
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
   const [activeTab, setActiveTab] = useState<"students" | "courses" | "stats">("students");
   const [searchQuery, setSearchQuery] = useState("");
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showAddStudentDialog, setShowAddStudentDialog] = useState(false);
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [isLoadingCourses, setIsLoadingCourses] = useState(true);
+
+  // Fetch courses from database
+  useEffect(() => {
+    const fetchCourses = async () => {
+      if (!user) return;
+
+      try {
+        // Get organization ID from profile
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("organization_id")
+          .eq("user_id", user.id)
+          .single();
+
+        if (!profile?.organization_id) {
+          setIsLoadingCourses(false);
+          return;
+        }
+
+        // Fetch courses for organization
+        const { data: coursesData, error } = await supabase
+          .from("courses")
+          .select(`
+            *,
+            lessons(count)
+          `)
+          .eq("organization_id", profile.organization_id)
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+
+        // Get enrollment counts
+        const coursesWithStats = await Promise.all(
+          (coursesData || []).map(async (course: any) => {
+            const { count } = await supabase
+              .from("enrollments")
+              .select("*", { count: "exact", head: true })
+              .eq("course_id", course.id);
+
+            return {
+              id: course.id,
+              title: course.title,
+              description: course.description,
+              is_published: course.is_published,
+              created_at: course.created_at,
+              lessonsCount: course.lessons?.[0]?.count || 0,
+              studentsCount: count || 0,
+              duration: course.duration || "—",
+            };
+          })
+        );
+
+        setCourses(coursesWithStats);
+      } catch (error) {
+        console.error("Error fetching courses:", error);
+        toast.error("Ошибка загрузки курсов");
+      } finally {
+        setIsLoadingCourses(false);
+      }
+    };
+
+    fetchCourses();
+  }, [user]);
 
   const handleLogout = async () => {
     await signOut();
@@ -398,32 +471,61 @@ export default function OrganizationDashboard() {
           )}
 
           {activeTab === "courses" && (
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {courses.map((course) => (
-                <div key={course.id} className="bg-card rounded-2xl border border-border overflow-hidden hover-lift group cursor-pointer">
-                  <div className="h-32 bg-gradient-to-br from-primary via-accent to-sigma-purple" />
-                  <div className="p-6">
-                    <h3 className="font-display font-semibold text-lg mb-2">{course.title}</h3>
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
-                      <div className="flex items-center gap-1">
-                        <Users className="w-4 h-4" />
-                        {course.studentsCount}
+            <div>
+              {isLoadingCourses ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                </div>
+              ) : courses.length === 0 ? (
+                <div className="text-center py-12 bg-card rounded-2xl border border-border">
+                  <BookOpen className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <h3 className="font-display font-semibold text-lg mb-2">Нет курсов</h3>
+                  <p className="text-muted-foreground mb-4">Создайте первый курс для обучения сотрудников</p>
+                  <Button onClick={() => navigate("/course-builder")} className="btn-gradient rounded-xl gap-2">
+                    <Plus className="w-4 h-4" />
+                    Создать курс
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {courses.map((course) => (
+                    <div key={course.id} className="bg-card rounded-2xl border border-border overflow-hidden hover-lift group">
+                      <div className="h-32 bg-gradient-to-br from-primary via-accent to-sigma-purple relative">
+                        {!course.is_published && (
+                          <span className="absolute top-3 right-3 px-2 py-1 bg-background/80 backdrop-blur-sm text-xs rounded-lg">
+                            Черновик
+                          </span>
+                        )}
                       </div>
-                      <div className="flex items-center gap-1">
-                        <BookOpen className="w-4 h-4" />
-                        {course.lessonsCount} уроков
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Clock className="w-4 h-4" />
-                        {course.duration}
+                      <div className="p-6">
+                        <h3 className="font-display font-semibold text-lg mb-2">{course.title}</h3>
+                        <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
+                          <div className="flex items-center gap-1">
+                            <Users className="w-4 h-4" />
+                            {course.studentsCount}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <BookOpen className="w-4 h-4" />
+                            {course.lessonsCount} уроков
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Clock className="w-4 h-4" />
+                            {course.duration}
+                          </div>
+                        </div>
+                        <Button 
+                          variant="outline" 
+                          className="w-full rounded-xl gap-2"
+                          onClick={() => navigate(`/course-builder/${course.id}`)}
+                        >
+                          <Edit className="w-4 h-4" />
+                          Редактировать
+                        </Button>
                       </div>
                     </div>
-                    <Button variant="outline" className="w-full rounded-xl">
-                      Редактировать
-                    </Button>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
           )}
 
