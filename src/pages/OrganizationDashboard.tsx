@@ -75,12 +75,17 @@ interface Student {
   status: string;
 }
 
-interface OrgDocument {
+interface Organization {
   id: string;
-  type: string;
   name: string;
-  file_url: string | null;
+  email: string;
+  contact_name: string | null;
+  phone: string | null;
+  inn: string | null;
+  ai_enabled: boolean;
   created_at: string;
+  studentsCount?: number;
+  coursesCount?: number;
 }
 
 interface StudentDocument {
@@ -127,7 +132,7 @@ interface RegistrationLink {
 export default function OrganizationDashboard() {
   const navigate = useNavigate();
   const { signOut, user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"students" | "courses" | "documents" | "stats" | "links">("students");
+  const [activeTab, setActiveTab] = useState<"students" | "courses" | "organizations" | "stats" | "links">("students");
   const [searchQuery, setSearchQuery] = useState("");
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showAddStudentDialog, setShowAddStudentDialog] = useState(false);
@@ -141,9 +146,9 @@ export default function OrganizationDashboard() {
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [organizationName, setOrganizationName] = useState("Организация");
   
-  // Documents state
-  const [orgDocuments, setOrgDocuments] = useState<OrgDocument[]>([]);
-  const [isLoadingDocs, setIsLoadingDocs] = useState(false);
+  // Organizations state
+  const [allOrganizations, setAllOrganizations] = useState<Organization[]>([]);
+  const [isLoadingOrgs, setIsLoadingOrgs] = useState(false);
   
   // Student details dialog
   const [selectedStudent, setSelectedStudent] = useState<StudentDetails | null>(null);
@@ -293,32 +298,58 @@ export default function OrganizationDashboard() {
     fetchData();
   }, [user]);
 
-  // Fetch organization documents
+  // Fetch all organizations
   useEffect(() => {
-    const fetchOrgDocuments = async () => {
-      if (!organizationId) return;
+    const fetchAllOrganizations = async () => {
+      if (activeTab !== "organizations") return;
       
-      setIsLoadingDocs(true);
+      setIsLoadingOrgs(true);
       try {
-        const { data, error } = await supabase
-          .from("org_documents")
+        const { data: orgs, error } = await supabase
+          .from("organizations")
           .select("*")
-          .eq("organization_id", organizationId)
           .order("created_at", { ascending: false });
-        
+
         if (error) throw error;
-        setOrgDocuments(data || []);
+
+        // Get stats for each org
+        const orgsWithStats = await Promise.all((orgs || []).map(async (org) => {
+          const { count: orgCoursesCount } = await supabase
+            .from("courses")
+            .select("*", { count: "exact", head: true })
+            .eq("organization_id", org.id);
+
+          const { data: courseIds } = await supabase
+            .from("courses")
+            .select("id")
+            .eq("organization_id", org.id);
+
+          let studentsCount = 0;
+          if (courseIds && courseIds.length > 0) {
+            const { count } = await supabase
+              .from("enrollments")
+              .select("*", { count: "exact", head: true })
+              .in("course_id", courseIds.map(c => c.id));
+            studentsCount = count || 0;
+          }
+
+          return {
+            ...org,
+            coursesCount: orgCoursesCount || 0,
+            studentsCount
+          };
+        }));
+
+        setAllOrganizations(orgsWithStats);
       } catch (error) {
-        console.error("Error fetching documents:", error);
+        console.error("Error fetching organizations:", error);
       } finally {
-        setIsLoadingDocs(false);
+        setIsLoadingOrgs(false);
       }
     };
 
-    if (activeTab === "documents") {
-      fetchOrgDocuments();
-    }
-  }, [organizationId, activeTab]);
+    fetchAllOrganizations();
+  }, [activeTab]);
 
   // Fetch registration links
   useEffect(() => {
@@ -519,64 +550,12 @@ export default function OrganizationDashboard() {
   };
 
   // Document upload handler
-  const handleUploadDocument = async (type: string, file: File) => {
-    if (!organizationId) return;
-    
-    try {
-      const filePath = `${organizationId}/${type}/${Date.now()}_${file.name}`;
-      
-      const { error: uploadError } = await supabase.storage
-        .from("org-documents")
-        .upload(filePath, file);
-      
-      if (uploadError) throw uploadError;
-      
-      const { data: { publicUrl } } = supabase.storage
-        .from("org-documents")
-        .getPublicUrl(filePath);
-      
-      const { error: dbError } = await supabase
-        .from("org_documents")
-        .insert({
-          organization_id: organizationId,
-          type,
-          name: file.name,
-          file_url: publicUrl
-        });
-      
-      if (dbError) throw dbError;
-      
-      // Refresh documents
-      const { data } = await supabase
-        .from("org_documents")
-        .select("*")
-        .eq("organization_id", organizationId)
-        .order("created_at", { ascending: false });
-      
-      setOrgDocuments(data || []);
-      toast.success("Документ загружен");
-    } catch (error) {
-      console.error("Error uploading document:", error);
-      toast.error("Ошибка загрузки документа");
-    }
-  };
-
-  const handleDeleteDocument = async (docId: string) => {
-    try {
-      const { error } = await supabase
-        .from("org_documents")
-        .delete()
-        .eq("id", docId);
-      
-      if (error) throw error;
-      
-      setOrgDocuments(orgDocuments.filter(d => d.id !== docId));
-      toast.success("Документ удалён");
-    } catch (error) {
-      console.error("Error deleting document:", error);
-      toast.error("Ошибка удаления");
-    }
-  };
+  // Filter organizations by search
+  const filteredOrganizations = allOrganizations.filter(org =>
+    org.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    org.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (org.inn && org.inn.includes(searchQuery))
+  );
 
   // Student details handler
   const handleViewStudent = async (student: Student) => {
@@ -735,62 +714,6 @@ export default function OrganizationDashboard() {
     s.email.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const getDocsByType = (type: string) => orgDocuments.filter(d => d.type === type);
-
-  // Document section component
-  const DocumentSection = ({ title, type, docs }: { title: string; type: string; docs: OrgDocument[] }) => (
-    <div className="bg-secondary/30 rounded-xl p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h4 className="font-medium">{title}</h4>
-        <label className="cursor-pointer">
-          <input
-            type="file"
-            className="hidden"
-            accept=".pdf,.doc,.docx"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleUploadDocument(type, file);
-            }}
-          />
-          <div className="flex items-center gap-1 text-sm text-primary hover:underline">
-            <Upload className="w-4 h-4" />
-            Загрузить
-          </div>
-        </label>
-      </div>
-      {docs.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Нет документов</p>
-      ) : (
-        <div className="space-y-2">
-          {docs.map(doc => (
-            <div key={doc.id} className="flex items-center justify-between p-2 bg-background rounded-lg">
-              <div className="flex items-center gap-2">
-                <FileText className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm truncate max-w-[200px]">{doc.name}</span>
-              </div>
-              <div className="flex gap-1">
-                {doc.file_url && (
-                  <a href={doc.file_url} target="_blank" rel="noopener noreferrer">
-                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                      <Download className="w-4 h-4" />
-                    </Button>
-                  </a>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                  onClick={() => handleDeleteDocument(doc.id)}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
 
   // Student document section
   const StudentDocSection = ({ title, type, docs, enrollmentId }: { 
@@ -889,15 +812,15 @@ export default function OrganizationDashboard() {
               Курсы
             </button>
             <button 
-              onClick={() => setActiveTab("documents")}
+              onClick={() => setActiveTab("organizations")}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${
-                activeTab === "documents" 
+                activeTab === "organizations" 
                   ? "bg-primary/10 text-primary" 
                   : "text-muted-foreground hover:bg-secondary"
               }`}
             >
-              <FileText className="w-5 h-5" />
-              Документы
+              <Building2 className="w-5 h-5" />
+              Организации
             </button>
             <button 
               onClick={() => setActiveTab("stats")}
@@ -948,7 +871,7 @@ export default function OrganizationDashboard() {
               <h1 className="font-display text-2xl font-bold">
                 {activeTab === "students" && "Управление учениками"}
                 {activeTab === "courses" && "Управление курсами"}
-                {activeTab === "documents" && "Документы организации"}
+                {activeTab === "organizations" && "Все организации"}
                 {activeTab === "stats" && "Статистика обучения"}
                 {activeTab === "links" && "Ссылки для регистрации"}
               </h1>
@@ -1351,18 +1274,86 @@ export default function OrganizationDashboard() {
             </div>
           )}
 
-          {activeTab === "documents" && (
-            <div className="bg-card rounded-2xl border border-border p-6">
-              <h2 className="font-display text-xl font-semibold mb-6">Документы организации</h2>
-              {isLoadingDocs ? (
+          {activeTab === "organizations" && (
+            <div className="bg-card rounded-2xl border border-border">
+              <div className="p-6 border-b border-border flex items-center justify-between">
+                <h2 className="font-display text-xl font-semibold">Список организаций</h2>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input 
+                    placeholder="Поиск по названию, email, ИНН..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10 w-64 rounded-xl"
+                  />
+                </div>
+              </div>
+              
+              {isLoadingOrgs ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 animate-spin text-primary" />
                 </div>
               ) : (
-                <div className="grid md:grid-cols-3 gap-6">
-                  <DocumentSection title="Договоры" type="contract" docs={getDocsByType("contract")} />
-                  <DocumentSection title="Счета" type="invoice" docs={getDocsByType("invoice")} />
-                  <DocumentSection title="Акты" type="act" docs={getDocsByType("act")} />
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Организация</th>
+                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Контакт</th>
+                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">ИНН</th>
+                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Студенты</th>
+                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Курсы</th>
+                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">ИИ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredOrganizations.map((org) => (
+                        <tr key={org.id} className="border-b border-border last:border-0 hover:bg-secondary/50 transition-colors">
+                          <td className="px-6 py-4">
+                            <div>
+                              <div className="font-medium">{org.name}</div>
+                              <div className="text-sm text-muted-foreground">{org.email}</div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div>
+                              <div className="text-sm">{org.contact_name || "—"}</div>
+                              <div className="text-sm text-muted-foreground">{org.phone || "—"}</div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 text-sm">{org.inn || "—"}</td>
+                          <td className="px-6 py-4">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary">
+                              <Users className="w-3 h-3" />
+                              {org.studentsCount || 0}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-accent/10 text-accent">
+                              <BookOpen className="w-3 h-3" />
+                              {org.coursesCount || 0}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                              org.ai_enabled 
+                                ? 'bg-sigma-green/10 text-sigma-green' 
+                                : 'bg-muted text-muted-foreground'
+                            }`}>
+                              {org.ai_enabled ? 'Включён' : 'Выключен'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredOrganizations.length === 0 && (
+                        <tr>
+                          <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
+                            Нет организаций
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
