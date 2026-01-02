@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +19,8 @@ import {
   Upload,
   ChevronDown,
   ChevronUp,
-  Loader2
+  Loader2,
+  FileUp
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
@@ -60,7 +61,62 @@ export default function CourseBuilder() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(!!courseId);
+  const [isImporting, setIsImporting] = useState(false);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Import course from file
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/import-course`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      );
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Ошибка импорта');
+      }
+
+      // Set course title from file
+      if (data.courseTitle && !courseTitle) {
+        setCourseTitle(data.courseTitle);
+      }
+
+      // Add imported lessons
+      const importedLessons: Lesson[] = data.lessons.map((l: any) => ({
+        id: l.id,
+        type: l.type as LessonType,
+        title: l.title,
+        content: l.content,
+        expanded: false,
+      }));
+
+      setLessons(prev => [...prev, ...importedLessons]);
+      toast.success(`Импортировано ${data.sectionsCount} разделов`);
+    } catch (error: any) {
+      console.error('Import error:', error);
+      toast.error(error.message || 'Ошибка импорта файла');
+    } finally {
+      setIsImporting(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
 
   // Fetch organization ID and course data if editing
   useEffect(() => {
@@ -298,6 +354,37 @@ export default function CourseBuilder() {
                     placeholder="Краткое описание курса..."
                     className="rounded-xl min-h-[100px]"
                   />
+                </div>
+              </div>
+            </div>
+
+            {/* Import from file */}
+            <div className="bg-gradient-to-r from-sigma-cyan/10 via-primary/10 to-sigma-purple/10 rounded-2xl border border-sigma-cyan/20 p-6">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sigma-cyan to-primary flex items-center justify-center flex-shrink-0">
+                  <FileUp className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-display font-semibold text-lg mb-1">Импорт из файла</h3>
+                  <p className="text-muted-foreground text-sm mb-4">
+                    Загрузите DOC, DOCX, HTML или TXT файл — контент будет разбит на разделы
+                  </p>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".doc,.docx,.html,.htm,.txt"
+                    onChange={handleFileImport}
+                    className="hidden"
+                  />
+                  <Button 
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isImporting}
+                    className="rounded-xl gap-2"
+                    variant="outline"
+                  >
+                    {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileUp className="w-4 h-4" />}
+                    {isImporting ? "Импорт..." : "Загрузить файл"}
+                  </Button>
                 </div>
               </div>
             </div>
