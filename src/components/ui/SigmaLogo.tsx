@@ -50,7 +50,7 @@ export function SigmaLogo({
       >
         <div className={cn(
           "flex items-center justify-center w-full h-full rounded-[10px]",
-          variant === "white" ? "bg-transparent" : "bg-card"
+          variant === "white" ? "bg-foreground/20" : "bg-card"
         )}>
           <span 
             className={cn(
