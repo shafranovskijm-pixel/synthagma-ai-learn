@@ -28,7 +28,8 @@ import {
   ChevronRight,
   Link,
   Copy,
-  Building2
+  Building2,
+  Save
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -157,6 +158,7 @@ export default function OrganizationDashboard() {
   const [newLinkName, setNewLinkName] = useState("");
   const [newLinkInn, setNewLinkInn] = useState("");
   const [isCreatingLink, setIsCreatingLink] = useState(false);
+  const [isCreatingStudent, setIsCreatingStudent] = useState(false);
   
   // Statistics state
   const [stats, setStats] = useState({
@@ -410,6 +412,93 @@ export default function OrganizationDashboard() {
     const url = `${window.location.origin}/student-register?token=${token}`;
     navigator.clipboard.writeText(url);
     toast.success("Ссылка скопирована");
+  };
+
+  // Generate random password
+  const generatePassword = () => {
+    const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let password = "";
+    for (let i = 0; i < 10; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return password;
+  };
+
+  // Create student (just save without sending email)
+  const handleCreateStudent = async (sendEmail: boolean) => {
+    if (!organizationId || !newStudentName || !newStudentEmail) {
+      toast.error("Заполните ФИО и Email");
+      return;
+    }
+
+    setIsCreatingStudent(true);
+    try {
+      const password = generatePassword();
+      
+      // Create user via edge function
+      const { data, error } = await supabase.functions.invoke("register-student", {
+        body: {
+          token: null, // No token - direct creation by org
+          email: newStudentEmail,
+          password,
+          full_name: newStudentName,
+          organization_id: organizationId,
+          course_id: selectedCourseId || null
+        }
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      if (sendEmail) {
+        // TODO: Send email with credentials
+        toast.success(`Ученик создан. Пароль: ${password} (сохраните его!)`);
+      } else {
+        toast.success(`Ученик создан. Пароль: ${password} (сохраните его!)`);
+      }
+
+      // Refresh students list
+      const { data: enrollments } = await supabase
+        .from("enrollments")
+        .select(`
+          id,
+          progress,
+          status,
+          started_at,
+          course_id,
+          courses!inner(id, title, organization_id),
+          profiles!inner(user_id, full_name, email)
+        `)
+        .eq("courses.organization_id", organizationId);
+
+      if (enrollments) {
+        const studentsList: Student[] = [];
+        for (const enrollment of enrollments as any[]) {
+          studentsList.push({
+            id: enrollment.profiles.user_id,
+            enrollment_id: enrollment.id,
+            name: enrollment.profiles.full_name || "Без имени",
+            email: enrollment.profiles.email || "",
+            course: enrollment.courses.title,
+            course_id: enrollment.course_id,
+            progress: enrollment.progress || 0,
+            lastActivity: enrollment.started_at,
+            status: enrollment.status
+          });
+        }
+        setStudents(studentsList);
+      }
+
+      setShowAddStudentDialog(false);
+      setNewStudentName("");
+      setNewStudentEmail("");
+      setSelectedCourseId("");
+    } catch (error: any) {
+      console.error("Error creating student:", error);
+      toast.error(error.message || "Ошибка создания ученика");
+    } finally {
+      setIsCreatingStudent(false);
+    }
   };
 
   const handleDeleteStudent = async (enrollmentId: string) => {
@@ -1010,9 +1099,23 @@ export default function OrganizationDashboard() {
                             </SelectContent>
                           </Select>
                         </div>
-                        <Button className="w-full btn-gradient rounded-xl">
-                          Создать и отправить доступ
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button 
+                            variant="outline" 
+                            className="flex-1 rounded-xl"
+                            onClick={() => handleCreateStudent(false)}
+                            disabled={isCreatingStudent}
+                          >
+                            {isCreatingStudent ? <Loader2 className="w-4 h-4 animate-spin" /> : "Сохранить"}
+                          </Button>
+                          <Button 
+                            className="flex-1 btn-gradient rounded-xl"
+                            onClick={() => handleCreateStudent(true)}
+                            disabled={isCreatingStudent}
+                          >
+                            {isCreatingStudent ? <Loader2 className="w-4 h-4 animate-spin" /> : "Сохранить и отправить"}
+                          </Button>
+                        </div>
                       </div>
                     </DialogContent>
                   </Dialog>
