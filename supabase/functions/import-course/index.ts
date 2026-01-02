@@ -323,17 +323,19 @@ serve(async (req) => {
 
     console.log(`Processing ${files.length} files`);
 
-    // Process all files in parallel
-    const processedFiles = await Promise.all(
-      files.map(async (file) => {
-        try {
-          return await processFile(file);
-        } catch (e) {
-          console.error(`Error processing ${file.name}:`, e);
-          return null;
-        }
-      })
-    );
+    // Process files SEQUENTIALLY to avoid CPU timeout
+    // (parallel processing of 20+ DOCX files exceeds edge function limits)
+    const processedFiles: Array<{ title: string; html: string; fileName: string } | null> = [];
+    for (const file of files) {
+      try {
+        const result = await processFile(file);
+        processedFiles.push(result);
+        console.log(`Completed: ${file.name}`);
+      } catch (e) {
+        console.error(`Error processing ${file.name}:`, e);
+        processedFiles.push(null);
+      }
+    }
 
     // Filter out failed files
     const validFiles = processedFiles.filter((f): f is NonNullable<typeof f> => f !== null);
