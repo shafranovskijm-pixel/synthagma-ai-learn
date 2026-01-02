@@ -35,7 +35,7 @@ export function SigmaLogo({
 
   const sigmaColors = {
     default: "from-primary via-accent to-sigma-purple",
-    white: "from-white to-white/90",
+    white: "from-primary via-accent to-sigma-purple",
     gradient: "from-primary via-accent to-sigma-purple",
   };
 
@@ -56,14 +56,12 @@ export function SigmaLogo({
       >
         <div className={cn(
           "flex items-center justify-center w-full h-full rounded-[10px]",
-          variant === "white" ? "bg-white/10 backdrop-blur-sm" : "bg-card"
+          variant === "white" ? "bg-white" : "bg-card"
         )}>
           <span 
             className={cn(
-              "font-display font-bold",
-              variant === "white" 
-                ? "text-white drop-shadow-lg" 
-                : "bg-gradient-to-br bg-clip-text text-transparent " + sigmaColors[variant],
+              "font-display font-bold bg-gradient-to-br bg-clip-text text-transparent",
+              sigmaColors[variant],
               size === "sm" && "text-lg",
               size === "md" && "text-xl",
               size === "lg" && "text-2xl",
