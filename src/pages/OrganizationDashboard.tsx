@@ -157,6 +157,13 @@ export default function OrganizationDashboard() {
   const [orgDocuments, setOrgDocuments] = useState<{ id: string; type: string; name: string; file_url: string | null; created_at: string }[]>([]);
   const [orgStudents, setOrgStudents] = useState<Student[]>([]);
   const [isLoadingOrgDetails, setIsLoadingOrgDetails] = useState(false);
+  const [showAddCompanyDialog, setShowAddCompanyDialog] = useState(false);
+  const [newCompanyName, setNewCompanyName] = useState("");
+  const [newCompanyEmail, setNewCompanyEmail] = useState("");
+  const [newCompanyInn, setNewCompanyInn] = useState("");
+  const [newCompanyContactName, setNewCompanyContactName] = useState("");
+  const [newCompanyPhone, setNewCompanyPhone] = useState("");
+  const [isCreatingCompany, setIsCreatingCompany] = useState(false);
   
   // Student details dialog
   const [selectedStudent, setSelectedStudent] = useState<StudentDetails | null>(null);
@@ -702,6 +709,76 @@ export default function OrganizationDashboard() {
     toast.success("Данные отправлены в ФИС ФРДО");
   };
 
+  // Create new company
+  const handleCreateCompany = async () => {
+    if (!newCompanyName || !newCompanyEmail) {
+      toast.error("Заполните название и email компании");
+      return;
+    }
+
+    setIsCreatingCompany(true);
+    try {
+      const { error } = await supabase
+        .from("organizations")
+        .insert({
+          name: newCompanyName,
+          email: newCompanyEmail,
+          inn: newCompanyInn || null,
+          contact_name: newCompanyContactName || null,
+          phone: newCompanyPhone || null
+        });
+
+      if (error) throw error;
+
+      // Refresh organizations list
+      const { data: orgs } = await supabase
+        .from("organizations")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      const orgsWithStats = await Promise.all((orgs || []).map(async (org) => {
+        const { count: orgCoursesCount } = await supabase
+          .from("courses")
+          .select("*", { count: "exact", head: true })
+          .eq("organization_id", org.id);
+
+        const { data: courseIds } = await supabase
+          .from("courses")
+          .select("id")
+          .eq("organization_id", org.id);
+
+        let studentsCount = 0;
+        if (courseIds && courseIds.length > 0) {
+          const { count } = await supabase
+            .from("enrollments")
+            .select("*", { count: "exact", head: true })
+            .in("course_id", courseIds.map(c => c.id));
+          studentsCount = count || 0;
+        }
+
+        return {
+          ...org,
+          coursesCount: orgCoursesCount || 0,
+          studentsCount
+        };
+      }));
+
+      setAllOrganizations(orgsWithStats);
+      setShowAddCompanyDialog(false);
+      setNewCompanyName("");
+      setNewCompanyEmail("");
+      setNewCompanyInn("");
+      setNewCompanyContactName("");
+      setNewCompanyPhone("");
+      toast.success("Компания добавлена");
+    } catch (error) {
+      console.error("Error creating company:", error);
+      toast.error("Ошибка создания компании");
+    } finally {
+      setIsCreatingCompany(false);
+    }
+  };
+
   // Get docs by type
   const getOrgDocsByType = (type: string) => orgDocuments.filter(d => d.type === type);
 
@@ -1024,7 +1101,7 @@ export default function OrganizationDashboard() {
               }`}
             >
               <Building2 className="w-5 h-5" />
-              Организации
+              Компании
             </button>
             <button 
               onClick={() => setActiveTab("stats")}
@@ -1074,7 +1151,7 @@ export default function OrganizationDashboard() {
             <div>
               <h1 className="font-display text-2xl font-bold">
                 {activeTab === "courses" && "Управление курсами"}
-                {activeTab === "organizations" && "Все организации"}
+                {activeTab === "organizations" && "Компании"}
                 {activeTab === "stats" && "Статистика обучения"}
                 {activeTab === "links" && "Ссылки для регистрации"}
               </h1>
@@ -1132,6 +1209,12 @@ export default function OrganizationDashboard() {
                     </div>
                   </DialogContent>
                 </Dialog>
+              )}
+              {activeTab === "organizations" && (
+                <Button className="btn-gradient rounded-xl gap-2" onClick={() => setShowAddCompanyDialog(true)}>
+                  <Plus className="w-4 h-4" />
+                  Добавить компанию
+                </Button>
               )}
               {activeTab === "courses" && (
                 <>
@@ -1262,7 +1345,7 @@ export default function OrganizationDashboard() {
           {activeTab === "organizations" && (
             <div className="bg-card rounded-2xl border border-border">
               <div className="p-6 border-b border-border flex items-center justify-between">
-                <h2 className="font-display text-xl font-semibold">Список организаций</h2>
+                <h2 className="font-display text-xl font-semibold">Список компаний</h2>
                 <div className="relative">
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <Input 
@@ -1283,7 +1366,7 @@ export default function OrganizationDashboard() {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-border">
-                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Организация</th>
+                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Компания</th>
                         <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Контакт</th>
                         <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">ИНН</th>
                         <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Студенты</th>
@@ -1345,7 +1428,7 @@ export default function OrganizationDashboard() {
                       {filteredOrganizations.length === 0 && (
                         <tr>
                           <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground">
-                            Нет организаций
+                            Нет компаний
                           </td>
                         </tr>
                       )}
@@ -1716,6 +1799,80 @@ export default function OrganizationDashboard() {
               </TabsContent>
             </Tabs>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Company Dialog */}
+      <Dialog open={showAddCompanyDialog} onOpenChange={setShowAddCompanyDialog}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display">Добавить компанию</DialogTitle>
+            <DialogDescription>
+              Заполните данные для новой компании
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Название компании *</Label>
+              <Input 
+                placeholder="ООО Пример" 
+                className="rounded-xl"
+                value={newCompanyName}
+                onChange={(e) => setNewCompanyName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Email *</Label>
+              <Input 
+                type="email"
+                placeholder="company@example.com" 
+                className="rounded-xl"
+                value={newCompanyEmail}
+                onChange={(e) => setNewCompanyEmail(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>ИНН</Label>
+              <Input 
+                placeholder="1234567890" 
+                className="rounded-xl"
+                value={newCompanyInn}
+                onChange={(e) => setNewCompanyInn(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Контактное лицо</Label>
+              <Input 
+                placeholder="Иванов Иван Иванович" 
+                className="rounded-xl"
+                value={newCompanyContactName}
+                onChange={(e) => setNewCompanyContactName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Телефон</Label>
+              <Input 
+                placeholder="+7 (999) 123-45-67" 
+                className="rounded-xl"
+                value={newCompanyPhone}
+                onChange={(e) => setNewCompanyPhone(e.target.value)}
+              />
+            </div>
+            <Button 
+              className="w-full btn-gradient rounded-xl"
+              onClick={handleCreateCompany}
+              disabled={isCreatingCompany}
+            >
+              {isCreatingCompany ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Создание...
+                </>
+              ) : (
+                "Добавить компанию"
+              )}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
