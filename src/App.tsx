@@ -12,6 +12,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import OrganizationDashboard from "./pages/OrganizationDashboard";
 import StudentDashboard from "./pages/StudentDashboard";
 import CourseBuilder from "./pages/CourseBuilder";
+import CoursePreview from "./pages/CoursePreview";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -50,6 +51,11 @@ const App = () => (
             <Route path="/course-builder/:courseId" element={
               <ProtectedRoute requiredRole="organization">
                 <CourseBuilder />
+              </ProtectedRoute>
+            } />
+            <Route path="/course-preview/:courseId" element={
+              <ProtectedRoute requiredRole="organization">
+                <CoursePreview />
               </ProtectedRoute>
             } />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
