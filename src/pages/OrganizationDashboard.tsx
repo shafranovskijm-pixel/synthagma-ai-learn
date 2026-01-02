@@ -21,7 +21,8 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
-  Edit
+  Edit,
+  Trash2
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -54,44 +55,17 @@ interface Course {
   duration?: string;
 }
 
-const students = [
-  { 
-    id: 1, 
-    name: "Петров Петр Петрович", 
-    email: "petrov@mail.ru",
-    course: "Основы безопасности",
-    progress: 75,
-    lastActivity: "2024-03-15",
-    status: "active"
-  },
-  { 
-    id: 2, 
-    name: "Иванова Мария Сергеевна", 
-    email: "ivanova@mail.ru",
-    course: "Пожарная безопасность",
-    progress: 100,
-    lastActivity: "2024-03-14",
-    status: "completed"
-  },
-  { 
-    id: 3, 
-    name: "Сидоров Алексей Викторович", 
-    email: "sidorov@mail.ru",
-    course: "Охрана труда",
-    progress: 45,
-    lastActivity: "2024-03-13",
-    status: "active"
-  },
-  { 
-    id: 4, 
-    name: "Козлова Анна Игоревна", 
-    email: "kozlova@mail.ru",
-    course: "Первая помощь",
-    progress: 20,
-    lastActivity: "2024-03-12",
-    status: "inactive"
-  },
-];
+interface Student {
+  id: string;
+  enrollment_id: string;
+  name: string;
+  email: string;
+  course: string;
+  course_id: string;
+  progress: number;
+  lastActivity: string;
+  status: string;
+}
 
 export default function OrganizationDashboard() {
   const navigate = useNavigate();
@@ -105,6 +79,8 @@ export default function OrganizationDashboard() {
   const [newStudentName, setNewStudentName] = useState("");
   const [newStudentEmail, setNewStudentEmail] = useState("");
   const [selectedCourseId, setSelectedCourseId] = useState<string>("");
+  const [students, setStudents] = useState<Student[]>([]);
+  const [isLoadingStudents, setIsLoadingStudents] = useState(true);
   
   // Statistics state
   const [stats, setStats] = useState({
@@ -166,6 +142,33 @@ export default function OrganizationDashboard() {
           ? Math.round(allEnrollments.reduce((sum, e) => sum + (e.progress || 0), 0) / totalStudents)
           : 0;
 
+        // Build students list from enrollments
+        const studentsList: Student[] = [];
+        for (const enrollment of allEnrollments) {
+          const course = coursesData?.find((c: any) => c.id === enrollment.course_id);
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("full_name, email")
+            .eq("user_id", enrollment.user_id)
+            .single();
+          
+          if (profile) {
+            studentsList.push({
+              id: enrollment.user_id,
+              enrollment_id: enrollment.id,
+              name: profile.full_name || "Без имени",
+              email: profile.email || "",
+              course: course?.title || "—",
+              course_id: enrollment.course_id,
+              progress: enrollment.progress || 0,
+              lastActivity: enrollment.started_at,
+              status: enrollment.status
+            });
+          }
+        }
+        setStudents(studentsList);
+        setIsLoadingStudents(false);
+
         setStats({
           totalStudents,
           totalCourses,
@@ -202,6 +205,23 @@ export default function OrganizationDashboard() {
 
   const handleLogout = async () => {
     await signOut();
+  };
+
+  const handleDeleteStudent = async (enrollmentId: string) => {
+    try {
+      const { error } = await supabase
+        .from("enrollments")
+        .delete()
+        .eq("id", enrollmentId);
+      
+      if (error) throw error;
+      
+      setStudents(students.filter(s => s.enrollment_id !== enrollmentId));
+      toast.success("Ученик удалён из курса");
+    } catch (error) {
+      console.error("Error deleting enrollment:", error);
+      toast.error("Ошибка удаления");
+    }
   };
 
   const filteredStudents = students.filter(s => 
@@ -525,8 +545,13 @@ export default function OrganizationDashboard() {
                             <Button variant="ghost" size="sm" className="rounded-lg">
                               <Eye className="w-4 h-4" />
                             </Button>
-                            <Button variant="ghost" size="sm" className="rounded-lg">
-                              <MoreHorizontal className="w-4 h-4" />
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="rounded-lg text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteStudent(student.enrollment_id)}
+                            >
+                              <Trash2 className="w-4 h-4" />
                             </Button>
                           </div>
                         </td>
