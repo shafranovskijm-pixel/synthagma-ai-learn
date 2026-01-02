@@ -29,7 +29,10 @@ import {
   Link,
   Copy,
   Building2,
-  Save
+  Save,
+  Send,
+  FileCheck,
+  Receipt
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -132,7 +135,7 @@ interface RegistrationLink {
 export default function OrganizationDashboard() {
   const navigate = useNavigate();
   const { signOut, user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"students" | "courses" | "organizations" | "stats" | "links">("students");
+  const [activeTab, setActiveTab] = useState<"courses" | "organizations" | "stats" | "links">("courses");
   const [searchQuery, setSearchQuery] = useState("");
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showAddStudentDialog, setShowAddStudentDialog] = useState(false);
@@ -149,6 +152,11 @@ export default function OrganizationDashboard() {
   // Organizations state
   const [allOrganizations, setAllOrganizations] = useState<Organization[]>([]);
   const [isLoadingOrgs, setIsLoadingOrgs] = useState(false);
+  const [selectedOrg, setSelectedOrg] = useState<Organization | null>(null);
+  const [showOrgDetails, setShowOrgDetails] = useState(false);
+  const [orgDocuments, setOrgDocuments] = useState<{ id: string; type: string; name: string; file_url: string | null; created_at: string }[]>([]);
+  const [orgStudents, setOrgStudents] = useState<Student[]>([]);
+  const [isLoadingOrgDetails, setIsLoadingOrgDetails] = useState(false);
   
   // Student details dialog
   const [selectedStudent, setSelectedStudent] = useState<StudentDetails | null>(null);
@@ -549,13 +557,220 @@ export default function OrganizationDashboard() {
     }
   };
 
-  // Document upload handler
   // Filter organizations by search
   const filteredOrganizations = allOrganizations.filter(org =>
     org.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     org.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (org.inn && org.inn.includes(searchQuery))
   );
+
+  // View organization details
+  const handleViewOrg = async (org: Organization) => {
+    setSelectedOrg(org);
+    setShowOrgDetails(true);
+    setIsLoadingOrgDetails(true);
+
+    try {
+      // Fetch organization documents
+      const { data: docs } = await supabase
+        .from("org_documents")
+        .select("*")
+        .eq("organization_id", org.id)
+        .order("created_at", { ascending: false });
+      
+      setOrgDocuments(docs || []);
+
+      // Fetch students for this organization
+      const { data: courseIds } = await supabase
+        .from("courses")
+        .select("id")
+        .eq("organization_id", org.id);
+
+      if (courseIds && courseIds.length > 0) {
+        const { data: enrollments } = await supabase
+          .from("enrollments")
+          .select(`
+            id,
+            progress,
+            status,
+            started_at,
+            course_id,
+            user_id
+          `)
+          .in("course_id", courseIds.map(c => c.id));
+
+        const studentsList: Student[] = [];
+        for (const enrollment of enrollments || []) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("full_name, email")
+            .eq("user_id", enrollment.user_id)
+            .single();
+          
+          const course = courses.find(c => c.id === enrollment.course_id);
+          
+          if (profile) {
+            studentsList.push({
+              id: enrollment.user_id,
+              enrollment_id: enrollment.id,
+              name: profile.full_name || "Без имени",
+              email: profile.email || "",
+              course: course?.title || "—",
+              course_id: enrollment.course_id,
+              progress: enrollment.progress || 0,
+              lastActivity: enrollment.started_at,
+              status: enrollment.status
+            });
+          }
+        }
+        setOrgStudents(studentsList);
+      } else {
+        setOrgStudents([]);
+      }
+    } catch (error) {
+      console.error("Error fetching org details:", error);
+      toast.error("Ошибка загрузки данных");
+    } finally {
+      setIsLoadingOrgDetails(false);
+    }
+  };
+
+  // Upload organization document
+  const handleUploadOrgDocument = async (type: 'contract' | 'invoice' | 'act', file: File) => {
+    if (!selectedOrg) return;
+
+    try {
+      const filePath = `${selectedOrg.id}/${type}_${Date.now()}_${file.name}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from("org-documents")
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from("org-documents")
+        .getPublicUrl(filePath);
+
+      const { error: dbError } = await supabase
+        .from("org_documents")
+        .insert({
+          organization_id: selectedOrg.id,
+          type,
+          name: file.name,
+          file_url: publicUrl
+        });
+
+      if (dbError) throw dbError;
+
+      toast.success("Документ загружен");
+      
+      // Refresh documents
+      const { data } = await supabase
+        .from("org_documents")
+        .select("*")
+        .eq("organization_id", selectedOrg.id)
+        .order("created_at", { ascending: false });
+      
+      setOrgDocuments(data || []);
+    } catch (error) {
+      console.error("Error uploading document:", error);
+      toast.error("Ошибка загрузки документа");
+    }
+  };
+
+  // Delete organization document
+  const handleDeleteOrgDocument = async (docId: string) => {
+    try {
+      const { error } = await supabase
+        .from("org_documents")
+        .delete()
+        .eq("id", docId);
+      
+      if (error) throw error;
+      
+      setOrgDocuments(orgDocuments.filter(d => d.id !== docId));
+      toast.success("Документ удалён");
+    } catch (error) {
+      console.error("Error deleting document:", error);
+      toast.error("Ошибка удаления");
+    }
+  };
+
+  // Send to FRDO
+  const handleSendToFRDO = () => {
+    toast.success("Данные отправлены в ФИС ФРДО");
+  };
+
+  // Get docs by type
+  const getOrgDocsByType = (type: string) => orgDocuments.filter(d => d.type === type);
+
+  // Document section component for org details
+  const OrgDocumentSection = ({ type, label, icon: Icon }: { type: 'contract' | 'invoice' | 'act', label: string, icon: React.ElementType }) => {
+    const docs = getOrgDocsByType(type);
+    
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Icon className="w-5 h-5 text-muted-foreground" />
+            <span className="font-medium">{label}</span>
+          </div>
+          <label className="cursor-pointer">
+            <input
+              type="file"
+              className="hidden"
+              accept=".pdf,.doc,.docx"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleUploadOrgDocument(type, file);
+              }}
+            />
+            <Button variant="outline" size="sm" className="rounded-lg gap-1" asChild>
+              <span>
+                <Upload className="w-4 h-4" />
+                Загрузить
+              </span>
+            </Button>
+          </label>
+        </div>
+        {docs.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Нет документов</p>
+        ) : (
+          <div className="space-y-2">
+            {docs.map((doc) => (
+              <div key={doc.id} className="flex items-center justify-between p-3 bg-secondary/50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-muted-foreground" />
+                  <span className="text-sm">{doc.name}</span>
+                </div>
+                <div className="flex gap-1">
+                  {doc.file_url && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="rounded-lg"
+                      onClick={() => window.open(doc.file_url!, '_blank')}
+                    >
+                      <Eye className="w-4 h-4" />
+                    </Button>
+                  )}
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="rounded-lg text-destructive hover:text-destructive"
+                    onClick={() => handleDeleteOrgDocument(doc.id)}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // Student details handler
   const handleViewStudent = async (student: Student) => {
@@ -790,17 +1005,6 @@ export default function OrganizationDashboard() {
         <nav className="flex-1 p-4">
           <div className="space-y-1">
             <button 
-              onClick={() => setActiveTab("students")}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${
-                activeTab === "students" 
-                  ? "bg-primary/10 text-primary" 
-                  : "text-muted-foreground hover:bg-secondary"
-              }`}
-            >
-              <Users className="w-5 h-5" />
-              Ученики
-            </button>
-            <button 
               onClick={() => setActiveTab("courses")}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${
                 activeTab === "courses" 
@@ -869,7 +1073,6 @@ export default function OrganizationDashboard() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="font-display text-2xl font-bold">
-                {activeTab === "students" && "Управление учениками"}
                 {activeTab === "courses" && "Управление курсами"}
                 {activeTab === "organizations" && "Все организации"}
                 {activeTab === "stats" && "Статистика обучения"}
@@ -929,120 +1132,6 @@ export default function OrganizationDashboard() {
                     </div>
                   </DialogContent>
                 </Dialog>
-              )}
-              {activeTab === "students" && (
-                <>
-                  <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" className="rounded-xl gap-2">
-                        <FileSpreadsheet className="w-4 h-4" />
-                        Импорт из Excel
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="rounded-2xl">
-                      <DialogHeader>
-                        <DialogTitle className="font-display">Импорт учеников</DialogTitle>
-                        <DialogDescription>
-                          Загрузите файл Excel или Word с данными учеников
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-primary/50 transition-colors cursor-pointer">
-                          <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-                          <p className="font-medium mb-1">Перетащите файл сюда</p>
-                          <p className="text-sm text-muted-foreground">
-                            Поддерживаются форматы: .xlsx, .xls, .docx
-                          </p>
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          <p className="font-medium mb-2">Формат файла:</p>
-                          <ul className="list-disc list-inside space-y-1">
-                            <li>ФИО (обязательно)</li>
-                            <li>Email (обязательно)</li>
-                            <li>Наименование курса</li>
-                          </ul>
-                        </div>
-                        <Button className="w-full btn-gradient rounded-xl">
-                          Загрузить и создать аккаунты
-                        </Button>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-                  <Dialog open={showAddStudentDialog} onOpenChange={setShowAddStudentDialog}>
-                    <DialogTrigger asChild>
-                      <Button className="btn-gradient rounded-xl gap-2">
-                        <Plus className="w-4 h-4" />
-                        Добавить ученика
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="rounded-2xl">
-                      <DialogHeader>
-                        <DialogTitle className="font-display">Добавить ученика</DialogTitle>
-                        <DialogDescription>
-                          Создайте аккаунт для нового ученика
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4 py-4">
-                        <div className="space-y-2">
-                          <Label>ФИО</Label>
-                          <Input 
-                            placeholder="Иванов Иван Иванович" 
-                            className="rounded-xl"
-                            value={newStudentName}
-                            onChange={(e) => setNewStudentName(e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Email</Label>
-                          <Input 
-                            type="email" 
-                            placeholder="ivanov@mail.ru" 
-                            className="rounded-xl"
-                            value={newStudentEmail}
-                            onChange={(e) => setNewStudentEmail(e.target.value)}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Курс</Label>
-                          <Select value={selectedCourseId} onValueChange={setSelectedCourseId}>
-                            <SelectTrigger className="rounded-xl">
-                              <SelectValue placeholder="Выберите курс" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {courses.map((course) => (
-                                <SelectItem key={course.id} value={course.id}>
-                                  {course.title}
-                                </SelectItem>
-                              ))}
-                              {courses.length === 0 && (
-                                <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                                  Нет доступных курсов
-                                </div>
-                              )}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button 
-                            variant="outline" 
-                            className="flex-1 rounded-xl"
-                            onClick={() => handleCreateStudent(false)}
-                            disabled={isCreatingStudent}
-                          >
-                            {isCreatingStudent ? <Loader2 className="w-4 h-4 animate-spin" /> : "Сохранить"}
-                          </Button>
-                          <Button 
-                            className="flex-1 btn-gradient rounded-xl"
-                            onClick={() => handleCreateStudent(true)}
-                            disabled={isCreatingStudent}
-                          >
-                            {isCreatingStudent ? <Loader2 className="w-4 h-4 animate-spin" /> : "Сохранить и отправить"}
-                          </Button>
-                        </div>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-                </>
               )}
               {activeTab === "courses" && (
                 <>
@@ -1110,110 +1199,6 @@ export default function OrganizationDashboard() {
           </div>
 
           {/* Content based on active tab */}
-          {activeTab === "students" && (
-            <div className="bg-card rounded-2xl border border-border">
-              <div className="p-6 border-b border-border flex items-center justify-between">
-                <h2 className="font-display text-xl font-semibold">Список учеников</h2>
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <Input 
-                    placeholder="Поиск..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 w-64 rounded-xl"
-                  />
-                </div>
-              </div>
-              
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-border">
-                      <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Ученик</th>
-                      <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Курс</th>
-                      <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Прогресс</th>
-                      <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Последняя активность</th>
-                      <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Статус</th>
-                      <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Действия</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredStudents.map((student) => (
-                      <tr key={student.enrollment_id} className="border-b border-border last:border-0 hover:bg-secondary/50 transition-colors">
-                        <td className="px-6 py-4">
-                          <div>
-                            <div className="font-medium">{student.name}</div>
-                            <div className="text-sm text-muted-foreground">{student.email}</div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">{student.course}</td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="flex-1 h-2 bg-secondary rounded-full overflow-hidden w-24">
-                              <div 
-                                className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
-                                style={{ width: `${student.progress}%` }}
-                              />
-                            </div>
-                            <span className="text-sm font-medium">{student.progress}%</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-2 text-muted-foreground">
-                            <Clock className="w-4 h-4" />
-                            {new Date(student.lastActivity).toLocaleDateString('ru-RU')}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                            student.status === "completed" 
-                              ? 'bg-sigma-green/10 text-sigma-green' 
-                              : student.status === "active"
-                              ? 'bg-primary/10 text-primary'
-                              : 'bg-muted text-muted-foreground'
-                          }`}>
-                            {student.status === "completed" && <CheckCircle2 className="w-3 h-3" />}
-                            {student.status === "completed" ? 'Завершён' : student.status === "active" ? 'В процессе' : 'Неактивен'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex gap-1">
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              className="rounded-lg"
-                              onClick={() => handleViewStudent(student)}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              className="rounded-lg text-destructive hover:text-destructive"
-                              onClick={() => handleDeleteStudent(student.enrollment_id)}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {filteredStudents.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
-                          {isLoadingStudents ? (
-                            <Loader2 className="w-6 h-6 animate-spin mx-auto" />
-                          ) : (
-                            "Нет учеников"
-                          )}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
 
           {activeTab === "courses" && (
             <div>
@@ -1304,6 +1289,7 @@ export default function OrganizationDashboard() {
                         <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Студенты</th>
                         <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Курсы</th>
                         <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">ИИ</th>
+                        <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Действия</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1343,11 +1329,22 @@ export default function OrganizationDashboard() {
                               {org.ai_enabled ? 'Включён' : 'Выключен'}
                             </span>
                           </td>
+                          <td className="px-6 py-4">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="rounded-lg gap-1"
+                              onClick={() => handleViewOrg(org)}
+                            >
+                              <Eye className="w-4 h-4" />
+                              Подробнее
+                            </Button>
+                          </td>
                         </tr>
                       ))}
                       {filteredOrganizations.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
+                          <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground">
                             Нет организаций
                           </td>
                         </tr>
@@ -1616,6 +1613,106 @@ export default function OrganizationDashboard() {
                     })}
                   </div>
                 )}
+              </TabsContent>
+            </Tabs>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Organization Details Dialog */}
+      <Dialog open={showOrgDetails} onOpenChange={setShowOrgDetails}>
+        <DialogContent className="max-w-3xl rounded-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">{selectedOrg?.name}</DialogTitle>
+            <DialogDescription>{selectedOrg?.email}</DialogDescription>
+          </DialogHeader>
+          
+          {isLoadingOrgDetails ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            </div>
+          ) : (
+            <Tabs defaultValue="students" className="mt-4">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="students">Ученики</TabsTrigger>
+                <TabsTrigger value="documents">Документы</TabsTrigger>
+                <TabsTrigger value="info">Информация</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="students" className="space-y-4 mt-4">
+                {orgStudents.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    Нет учеников в этой организации
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {orgStudents.map((student) => (
+                      <div key={student.enrollment_id} className="flex items-center justify-between p-4 bg-secondary/30 rounded-xl">
+                        <div className="flex-1">
+                          <div className="font-medium">{student.name}</div>
+                          <div className="text-sm text-muted-foreground">{student.email}</div>
+                          <div className="text-xs text-muted-foreground mt-1">{student.course}</div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <div className="text-sm font-medium">{student.progress}%</div>
+                            <div className="w-20 h-2 bg-secondary rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
+                                style={{ width: `${student.progress}%` }}
+                              />
+                            </div>
+                          </div>
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${
+                            student.status === "completed" 
+                              ? 'bg-sigma-green/10 text-sigma-green' 
+                              : student.status === "active"
+                              ? 'bg-primary/10 text-primary'
+                              : 'bg-muted text-muted-foreground'
+                          }`}>
+                            {student.status === "completed" ? 'Завершён' : student.status === "active" ? 'В процессе' : 'Неактивен'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="documents" className="space-y-6 mt-4">
+                <OrgDocumentSection type="contract" label="Договоры" icon={FileText} />
+                <OrgDocumentSection type="invoice" label="Счета" icon={Receipt} />
+                <OrgDocumentSection type="act" label="Акты" icon={FileCheck} />
+              </TabsContent>
+              
+              <TabsContent value="info" className="space-y-4 mt-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 bg-secondary/50 rounded-xl">
+                    <div className="text-sm text-muted-foreground">Контактное лицо</div>
+                    <div className="font-medium">{selectedOrg?.contact_name || "—"}</div>
+                  </div>
+                  <div className="p-4 bg-secondary/50 rounded-xl">
+                    <div className="text-sm text-muted-foreground">Телефон</div>
+                    <div className="font-medium">{selectedOrg?.phone || "—"}</div>
+                  </div>
+                  <div className="p-4 bg-secondary/50 rounded-xl">
+                    <div className="text-sm text-muted-foreground">ИНН</div>
+                    <div className="font-medium">{selectedOrg?.inn || "—"}</div>
+                  </div>
+                  <div className="p-4 bg-secondary/50 rounded-xl">
+                    <div className="text-sm text-muted-foreground">Дата регистрации</div>
+                    <div className="font-medium">
+                      {selectedOrg?.created_at ? new Date(selectedOrg.created_at).toLocaleDateString('ru-RU') : "—"}
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="flex gap-3 pt-4">
+                  <Button className="flex-1 btn-gradient rounded-xl gap-2" onClick={handleSendToFRDO}>
+                    <Send className="w-4 h-4" />
+                    Выгрузить в ФИС ФРДО
+                  </Button>
+                </div>
               </TabsContent>
             </Tabs>
           )}
