@@ -322,6 +322,47 @@ export type Database = {
           },
         ]
       }
+      registration_links: {
+        Row: {
+          created_at: string
+          expires_at: string | null
+          id: string
+          inn: string | null
+          name: string | null
+          organization_id: string
+          token: string
+          used_count: number
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          inn?: string | null
+          name?: string | null
+          organization_id: string
+          token: string
+          used_count?: number
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          inn?: string | null
+          name?: string | null
+          organization_id?: string
+          token?: string
+          used_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "registration_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       student_documents: {
         Row: {
           created_at: string

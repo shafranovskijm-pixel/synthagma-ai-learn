@@ -8,6 +8,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Index from "./pages/Index";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import StudentRegister from "./pages/StudentRegister";
 import AdminDashboard from "./pages/AdminDashboard";
 import OrganizationDashboard from "./pages/OrganizationDashboard";
 import StudentDashboard from "./pages/StudentDashboard";
@@ -28,6 +29,7 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/student-register" element={<StudentRegister />} />
             <Route path="/admin" element={
               <ProtectedRoute requiredRole="admin">
                 <AdminDashboard />

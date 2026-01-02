@@ -25,7 +25,10 @@ import {
   FileText,
   Download,
   X,
-  ChevronRight
+  ChevronRight,
+  Link,
+  Copy,
+  Building2
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -110,10 +113,20 @@ interface StudentDetails {
   testAttempts: TestAttempt[];
 }
 
+interface RegistrationLink {
+  id: string;
+  token: string;
+  name: string | null;
+  inn: string | null;
+  expires_at: string;
+  used_count: number;
+  created_at: string;
+}
+
 export default function OrganizationDashboard() {
   const navigate = useNavigate();
   const { signOut, user } = useAuth();
-  const [activeTab, setActiveTab] = useState<"students" | "courses" | "documents" | "stats">("students");
+  const [activeTab, setActiveTab] = useState<"students" | "courses" | "documents" | "stats" | "links">("students");
   const [searchQuery, setSearchQuery] = useState("");
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showAddStudentDialog, setShowAddStudentDialog] = useState(false);
@@ -136,6 +149,14 @@ export default function OrganizationDashboard() {
   const [showStudentDialog, setShowStudentDialog] = useState(false);
   const [isLoadingStudentDetails, setIsLoadingStudentDetails] = useState(false);
   const [testQuestions, setTestQuestions] = useState<Record<string, TestQuestion[]>>({});
+  
+  // Registration links state
+  const [registrationLinks, setRegistrationLinks] = useState<RegistrationLink[]>([]);
+  const [isLoadingLinks, setIsLoadingLinks] = useState(false);
+  const [showCreateLinkDialog, setShowCreateLinkDialog] = useState(false);
+  const [newLinkName, setNewLinkName] = useState("");
+  const [newLinkInn, setNewLinkInn] = useState("");
+  const [isCreatingLink, setIsCreatingLink] = useState(false);
   
   // Statistics state
   const [stats, setStats] = useState({
@@ -297,8 +318,98 @@ export default function OrganizationDashboard() {
     }
   }, [organizationId, activeTab]);
 
+  // Fetch registration links
+  useEffect(() => {
+    const fetchLinks = async () => {
+      if (!organizationId || activeTab !== "links") return;
+      
+      setIsLoadingLinks(true);
+      try {
+        const { data, error } = await supabase
+          .from("registration_links")
+          .select("*")
+          .eq("organization_id", organizationId)
+          .order("created_at", { ascending: false });
+        
+        if (error) throw error;
+        setRegistrationLinks(data || []);
+      } catch (error) {
+        console.error("Error fetching links:", error);
+      } finally {
+        setIsLoadingLinks(false);
+      }
+    };
+
+    fetchLinks();
+  }, [organizationId, activeTab]);
+
   const handleLogout = async () => {
     await signOut();
+  };
+
+  const generateToken = () => {
+    return Math.random().toString(36).substring(2) + Date.now().toString(36);
+  };
+
+  const handleCreateRegistrationLink = async () => {
+    if (!organizationId) return;
+    
+    setIsCreatingLink(true);
+    try {
+      const token = generateToken();
+      
+      const { error } = await supabase
+        .from("registration_links")
+        .insert({
+          organization_id: organizationId,
+          token,
+          name: newLinkName || null,
+          inn: newLinkInn || null
+        });
+      
+      if (error) throw error;
+      
+      // Refresh links
+      const { data } = await supabase
+        .from("registration_links")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .order("created_at", { ascending: false });
+      
+      setRegistrationLinks(data || []);
+      setShowCreateLinkDialog(false);
+      setNewLinkName("");
+      setNewLinkInn("");
+      toast.success("Ссылка для регистрации создана");
+    } catch (error) {
+      console.error("Error creating link:", error);
+      toast.error("Ошибка создания ссылки");
+    } finally {
+      setIsCreatingLink(false);
+    }
+  };
+
+  const handleDeleteLink = async (linkId: string) => {
+    try {
+      const { error } = await supabase
+        .from("registration_links")
+        .delete()
+        .eq("id", linkId);
+      
+      if (error) throw error;
+      
+      setRegistrationLinks(registrationLinks.filter(l => l.id !== linkId));
+      toast.success("Ссылка удалена");
+    } catch (error) {
+      console.error("Error deleting link:", error);
+      toast.error("Ошибка удаления");
+    }
+  };
+
+  const copyLinkToClipboard = (token: string) => {
+    const url = `${window.location.origin}/student-register?token=${token}`;
+    navigator.clipboard.writeText(url);
+    toast.success("Ссылка скопирована");
   };
 
   const handleDeleteStudent = async (enrollmentId: string) => {
@@ -710,6 +821,17 @@ export default function OrganizationDashboard() {
               <BarChart3 className="w-5 h-5" />
               Статистика
             </button>
+            <button 
+              onClick={() => setActiveTab("links")}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${
+                activeTab === "links" 
+                  ? "bg-primary/10 text-primary" 
+                  : "text-muted-foreground hover:bg-secondary"
+              }`}
+            >
+              <Link className="w-5 h-5" />
+              Ссылки регистрации
+            </button>
             <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-muted-foreground hover:bg-secondary transition-colors">
               <Settings className="w-5 h-5" />
               Настройки
@@ -739,10 +861,63 @@ export default function OrganizationDashboard() {
                 {activeTab === "courses" && "Управление курсами"}
                 {activeTab === "documents" && "Документы организации"}
                 {activeTab === "stats" && "Статистика обучения"}
+                {activeTab === "links" && "Ссылки для регистрации"}
               </h1>
               <p className="text-muted-foreground">{organizationName}</p>
             </div>
             <div className="flex gap-3">
+              {activeTab === "links" && (
+                <Dialog open={showCreateLinkDialog} onOpenChange={setShowCreateLinkDialog}>
+                  <DialogTrigger asChild>
+                    <Button className="btn-gradient rounded-xl gap-2">
+                      <Plus className="w-4 h-4" />
+                      Создать ссылку
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="rounded-2xl">
+                    <DialogHeader>
+                      <DialogTitle className="font-display">Создать ссылку регистрации</DialogTitle>
+                      <DialogDescription>
+                        Ученики, зарегистрировавшиеся по этой ссылке, автоматически привяжутся к вашей организации
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                      <div className="space-y-2">
+                        <Label>Название (опционально)</Label>
+                        <Input 
+                          placeholder="Например: Набор июль 2026" 
+                          className="rounded-xl"
+                          value={newLinkName}
+                          onChange={(e) => setNewLinkName(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>ИНН организации (опционально)</Label>
+                        <Input 
+                          placeholder="1234567890" 
+                          className="rounded-xl"
+                          value={newLinkInn}
+                          onChange={(e) => setNewLinkInn(e.target.value)}
+                        />
+                      </div>
+                      <Button 
+                        className="w-full btn-gradient rounded-xl"
+                        onClick={handleCreateRegistrationLink}
+                        disabled={isCreatingLink}
+                      >
+                        {isCreatingLink ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Создание...
+                          </>
+                        ) : (
+                          "Создать ссылку"
+                        )}
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              )}
               {activeTab === "students" && (
                 <>
                   <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
@@ -1135,6 +1310,90 @@ export default function OrganizationDashboard() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeTab === "links" && (
+            <div>
+              {isLoadingLinks ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                </div>
+              ) : registrationLinks.length === 0 ? (
+                <div className="text-center py-12 bg-card rounded-2xl border border-border">
+                  <Link className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                  <h3 className="font-display font-semibold text-lg mb-2">Нет ссылок регистрации</h3>
+                  <p className="text-muted-foreground mb-4">
+                    Создайте ссылку, чтобы ученики могли зарегистрироваться и автоматически привязаться к вашей организации
+                  </p>
+                  <Button onClick={() => setShowCreateLinkDialog(true)} className="btn-gradient rounded-xl gap-2">
+                    <Plus className="w-4 h-4" />
+                    Создать ссылку
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {registrationLinks.map((link) => {
+                    const isExpired = new Date(link.expires_at) < new Date();
+                    const linkUrl = `${window.location.origin}/student-register?token=${link.token}`;
+                    
+                    return (
+                      <div 
+                        key={link.id} 
+                        className={`bg-card rounded-2xl border p-6 ${
+                          isExpired ? 'border-destructive/30 opacity-60' : 'border-border'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <h3 className="font-display font-semibold text-lg">
+                                {link.name || "Ссылка регистрации"}
+                              </h3>
+                              {isExpired && (
+                                <span className="px-2 py-0.5 bg-destructive/10 text-destructive text-xs rounded-full">
+                                  Истекла
+                                </span>
+                              )}
+                            </div>
+                            {link.inn && (
+                              <p className="text-sm text-muted-foreground mb-2">
+                                ИНН: {link.inn}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
+                              <span>Использована: {link.used_count} раз</span>
+                              <span>•</span>
+                              <span>
+                                Действует до: {new Date(link.expires_at).toLocaleDateString('ru-RU')}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 p-3 bg-secondary/50 rounded-xl">
+                              <code className="flex-1 text-sm truncate">{linkUrl}</code>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => copyLinkToClipboard(link.token)}
+                                className="shrink-0"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive ml-4"
+                            onClick={() => handleDeleteLink(link.id)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
