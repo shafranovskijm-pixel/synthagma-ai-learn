@@ -615,19 +615,19 @@ function RenderBlock({
 
   switch (block.type) {
     case "paragraph":
-      return <p>{block.content}</p>;
+      return <p dangerouslySetInnerHTML={{ __html: block.content }} />;
 
     case "heading1":
-      return <h1 className="text-2xl font-bold">{block.content}</h1>;
+      return <h1 className="text-2xl font-bold" dangerouslySetInnerHTML={{ __html: block.content }} />;
 
     case "heading2":
-      return <h2 className="text-xl font-semibold">{block.content}</h2>;
+      return <h2 className="text-xl font-semibold" dangerouslySetInnerHTML={{ __html: block.content }} />;
 
     case "bulletList":
       return (
         <ul className="list-disc pl-6">
           {(block.content || "").split("\n").filter(Boolean).map((item, i) => (
-            <li key={i}>{item}</li>
+            <li key={i} dangerouslySetInnerHTML={{ __html: item }} />
           ))}
         </ul>
       );
@@ -636,7 +636,7 @@ function RenderBlock({
       return (
         <ol className="list-decimal pl-6">
           {(block.content || "").split("\n").filter(Boolean).map((item, i) => (
-            <li key={i}>{item}</li>
+            <li key={i} dangerouslySetInnerHTML={{ __html: item }} />
           ))}
         </ol>
       );
@@ -644,7 +644,7 @@ function RenderBlock({
     case "quote":
       return (
         <blockquote className="border-l-4 border-muted-foreground/30 pl-4 italic text-muted-foreground">
-          {block.content}
+          <span dangerouslySetInnerHTML={{ __html: block.content }} />
         </blockquote>
       );
 
@@ -652,7 +652,7 @@ function RenderBlock({
       return (
         <div className="rounded-xl p-4 bg-blue-500/10 border border-blue-500/30 flex gap-3 not-prose">
           <AlertCircle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-          <p className="text-sm">{block.content}</p>
+          <p className="text-sm" dangerouslySetInnerHTML={{ __html: block.content }} />
         </div>
       );
 
@@ -660,7 +660,7 @@ function RenderBlock({
       return (
         <div className="rounded-xl p-4 bg-amber-500/10 border border-amber-500/30 flex gap-3 not-prose">
           <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
-          <p className="text-sm">{block.content}</p>
+          <p className="text-sm" dangerouslySetInnerHTML={{ __html: block.content }} />
         </div>
       );
 
@@ -668,7 +668,7 @@ function RenderBlock({
       return (
         <div className="rounded-xl p-4 bg-green-500/10 border border-green-500/30 flex gap-3 not-prose">
           <Lightbulb className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
-          <p className="text-sm">{block.content}</p>
+          <p className="text-sm" dangerouslySetInnerHTML={{ __html: block.content }} />
         </div>
       );
 
@@ -684,7 +684,7 @@ function RenderBlock({
           </button>
           {accordionOpen && (
             <div className="p-3 pt-0 border-t border-purple-500/20">
-              <p className="text-sm">{block.content}</p>
+              <p className="text-sm" dangerouslySetInnerHTML={{ __html: block.content }} />
             </div>
           )}
         </div>
