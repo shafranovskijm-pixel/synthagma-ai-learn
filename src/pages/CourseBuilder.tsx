@@ -289,9 +289,6 @@ export default function CourseBuilder() {
           .eq("id", courseId);
 
         if (error) throw error;
-
-        // Delete existing lessons and recreate
-        await supabase.from("lessons").delete().eq("course_id", courseId);
       } else {
         // Create new course
         const { data: newCourse, error } = await supabase
@@ -308,22 +305,43 @@ export default function CourseBuilder() {
         savedCourseId = newCourse.id;
       }
 
-      // Insert lessons
+      // Upsert lessons one by one to avoid losing data on partial failures
       if (lessons.length > 0 && savedCourseId) {
-        const lessonsToInsert = lessons.map((lesson, index) => ({
-          id: lesson.id,
-          course_id: savedCourseId,
-          title: lesson.title,
-          type: lesson.type,
-          content: lesson.content || null,
-          order_index: index,
-        }));
+        const currentLessonIds = lessons.map(l => l.id);
+        
+        // Delete lessons that are no longer in the list
+        if (courseId) {
+          const { error: deleteError } = await supabase
+            .from("lessons")
+            .delete()
+            .eq("course_id", courseId)
+            .not("id", "in", `(${currentLessonIds.join(",")})`);
+          
+          if (deleteError) {
+            console.error("Error deleting removed lessons:", deleteError);
+          }
+        }
 
-        const { error: lessonsError } = await supabase
-          .from("lessons")
-          .insert(lessonsToInsert);
+        // Upsert each lesson
+        for (let index = 0; index < lessons.length; index++) {
+          const lesson = lessons[index];
+          const { error: upsertError } = await supabase
+            .from("lessons")
+            .upsert({
+              id: lesson.id,
+              course_id: savedCourseId,
+              title: lesson.title,
+              type: lesson.type,
+              content: lesson.content || null,
+              order_index: index,
+            }, { onConflict: "id" });
 
-        if (lessonsError) throw lessonsError;
+          if (upsertError) {
+            console.error(`Error saving lesson "${lesson.title}":`, upsertError);
+            toast.error(`Ошибка сохранения урока "${lesson.title}": ${upsertError.message}`);
+            // Continue with other lessons instead of failing completely
+          }
+        }
       }
 
       toast.success(courseId ? "Курс обновлён" : "Курс создан");
