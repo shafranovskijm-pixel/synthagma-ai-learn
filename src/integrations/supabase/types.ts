@@ -380,6 +380,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_test_questions: { Args: { p_lesson_id: string }; Returns: Json }
       get_user_role: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]
@@ -390,6 +391,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      submit_test_answers: {
+        Args: { p_lesson_id: string; p_user_answers: Json }
+        Returns: Json
       }
     }
     Enums: {
