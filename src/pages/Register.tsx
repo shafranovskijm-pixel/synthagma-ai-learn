@@ -1,35 +1,94 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SigmaLogo } from "@/components/ui/SigmaLogo";
-import { ArrowLeft, Building2, GraduationCap } from "lucide-react";
+import { ArrowLeft, Building2, GraduationCap, Eye, EyeOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
+import { z } from "zod";
 
 type RegistrationType = "organization" | "student";
+
+// Validation schema
+const registerSchema = z.object({
+  email: z.string().trim().email({ message: "Введите корректный email" }).max(255),
+  password: z.string().min(6, { message: "Пароль должен быть не менее 6 символов" }).max(128),
+  fullName: z.string().trim().min(1, { message: "Введите имя" }).max(200),
+});
 
 export default function Register() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user, role, loading, signUp } = useAuth();
   const [step, setStep] = useState<"select" | "form">("select");
-  const [type, setType] = useState<RegistrationType>("organization");
+  const [type, setType] = useState<RegistrationType>("student");
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  
+  // Form state
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [errors, setErrors] = useState<{ email?: string; password?: string; fullName?: string }>({});
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (!loading && user && role) {
+      const redirectPath = role === 'admin' ? '/admin' : role === 'organization' ? '/organization' : '/student';
+      navigate(redirectPath, { replace: true });
+    }
+  }, [user, role, loading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setErrors({});
+    
+    // Validate inputs
+    const result = registerSchema.safeParse({ email, password, fullName });
+    if (!result.success) {
+      const fieldErrors: { email?: string; password?: string; fullName?: string } = {};
+      result.error.errors.forEach((err) => {
+        if (err.path[0] === 'email') fieldErrors.email = err.message;
+        if (err.path[0] === 'password') fieldErrors.password = err.message;
+        if (err.path[0] === 'fullName') fieldErrors.fullName = err.message;
+      });
+      setErrors(fieldErrors);
+      return;
+    }
+
     setIsLoading(true);
     
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const { error } = await signUp(email, password, fullName);
     
-    toast({
-      title: "Регистрация успешна!",
-      description: "На вашу почту отправлены данные для входа",
-    });
+    if (error) {
+      let errorMessage = error.message;
+      if (error.message.includes("User already registered")) {
+        errorMessage = "Пользователь с таким email уже зарегистрирован";
+      }
+      toast({
+        title: "Ошибка регистрации",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } else {
+      toast({
+        title: "Регистрация успешна!",
+        description: "Добро пожаловать в систему",
+      });
+    }
     
-    navigate("/login");
     setIsLoading(false);
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -85,7 +144,7 @@ export default function Register() {
                     <div>
                       <h3 className="font-display text-xl font-semibold mb-1">Ученик</h3>
                       <p className="text-muted-foreground">
-                        Присоединиться к существующей организации
+                        Для самостоятельного обучения
                       </p>
                     </div>
                   </div>
@@ -110,58 +169,20 @@ export default function Register() {
               </p>
 
               <form onSubmit={handleSubmit} className="space-y-5">
-                {type === "organization" ? (
-                  <>
-                    <div className="space-y-2">
-                      <Label htmlFor="orgName">Название организации</Label>
-                      <Input
-                        id="orgName"
-                        placeholder="Учебный центр СТАТУС"
-                        className="h-12 rounded-xl"
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="inn">ИНН организации</Label>
-                      <Input
-                        id="inn"
-                        placeholder="1234567890"
-                        className="h-12 rounded-xl"
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="contactName">Контактное лицо</Label>
-                      <Input
-                        id="contactName"
-                        placeholder="Иванов Иван Иванович"
-                        className="h-12 rounded-xl"
-                        required
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="space-y-2">
-                      <Label htmlFor="fullName">ФИО</Label>
-                      <Input
-                        id="fullName"
-                        placeholder="Иванов Иван Иванович"
-                        className="h-12 rounded-xl"
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="inviteCode">Код приглашения</Label>
-                      <Input
-                        id="inviteCode"
-                        placeholder="ABC123"
-                        className="h-12 rounded-xl"
-                        required
-                      />
-                    </div>
-                  </>
-                )}
+                <div className="space-y-2">
+                  <Label htmlFor="fullName">
+                    {type === "organization" ? "Контактное лицо" : "ФИО"}
+                  </Label>
+                  <Input
+                    id="fullName"
+                    placeholder="Иванов Иван Иванович"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    className={`h-12 rounded-xl ${errors.fullName ? 'border-destructive' : ''}`}
+                    required
+                  />
+                  {errors.fullName && <p className="text-sm text-destructive">{errors.fullName}</p>}
+                </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
@@ -169,20 +190,35 @@ export default function Register() {
                     id="email"
                     type="email"
                     placeholder="example@mail.ru"
-                    className="h-12 rounded-xl"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className={`h-12 rounded-xl ${errors.email ? 'border-destructive' : ''}`}
                     required
                   />
+                  {errors.email && <p className="text-sm text-destructive">{errors.email}</p>}
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="phone">Телефон</Label>
-                  <Input
-                    id="phone"
-                    type="tel"
-                    placeholder="+7 (999) 123-45-67"
-                    className="h-12 rounded-xl"
-                    required
-                  />
+                  <Label htmlFor="password">Пароль</Label>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className={`h-12 rounded-xl pr-12 ${errors.password ? 'border-destructive' : ''}`}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
+                  </div>
+                  {errors.password && <p className="text-sm text-destructive">{errors.password}</p>}
                 </div>
 
                 <Button
