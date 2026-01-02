@@ -326,21 +326,43 @@ function BlockItem({
 
 // Block Content Component
 function BlockContent({ block, onUpdate }: { block: ContentBlock; onUpdate: (updates: Partial<ContentBlock>) => void }) {
+  const [isEditing, setIsEditing] = useState(false);
+  
+  // Helper to strip HTML for plain text editing
+  const stripHtml = (html: string) => {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return doc.body.textContent || '';
+  };
+  
   switch (block.type) {
     case "paragraph":
       return (
-        <Textarea
-          value={block.content}
-          onChange={(e) => onUpdate({ content: e.target.value })}
-          placeholder="Введите текст..."
-          className="min-h-[60px] border-0 bg-transparent resize-none focus-visible:ring-0 px-0"
-        />
+        <div 
+          className="py-2 min-h-[40px] cursor-text"
+          onClick={() => setIsEditing(true)}
+        >
+          {isEditing ? (
+            <Textarea
+              autoFocus
+              value={block.content}
+              onChange={(e) => onUpdate({ content: e.target.value })}
+              onBlur={() => setIsEditing(false)}
+              placeholder="Введите текст..."
+              className="min-h-[60px] border-0 bg-transparent resize-none focus-visible:ring-0 px-0"
+            />
+          ) : (
+            <div 
+              className="prose prose-sm dark:prose-invert max-w-none [&_strong]:font-bold [&_em]:italic"
+              dangerouslySetInnerHTML={{ __html: block.content || '<span class="text-muted-foreground">Введите текст...</span>' }}
+            />
+          )}
+        </div>
       );
 
     case "heading1":
       return (
         <Input
-          value={block.content}
+          value={stripHtml(block.content)}
           onChange={(e) => onUpdate({ content: e.target.value })}
           placeholder="Заголовок 1"
           className="text-2xl font-bold border-0 bg-transparent focus-visible:ring-0 px-0 h-auto py-2"
@@ -350,7 +372,7 @@ function BlockContent({ block, onUpdate }: { block: ContentBlock; onUpdate: (upd
     case "heading2":
       return (
         <Input
-          value={block.content}
+          value={stripHtml(block.content)}
           onChange={(e) => onUpdate({ content: e.target.value })}
           placeholder="Заголовок 2"
           className="text-xl font-semibold border-0 bg-transparent focus-visible:ring-0 px-0 h-auto py-2"
@@ -361,14 +383,21 @@ function BlockContent({ block, onUpdate }: { block: ContentBlock; onUpdate: (upd
     case "numberedList":
       return (
         <div className="space-y-1 py-2">
-          {(block.content || "").split("\n").map((item, i) => (
-            <div key={i} className="flex items-start gap-2">
-              <span className="text-muted-foreground mt-0.5">
-                {block.type === "bulletList" ? "•" : `${i + 1}.`}
-              </span>
-              <span className="flex-1">{item}</span>
-            </div>
-          ))}
+          <div className="prose prose-sm dark:prose-invert max-w-none">
+            {block.type === "bulletList" ? (
+              <ul className="list-disc pl-4">
+                {(block.content || "").split("\n").filter(Boolean).map((item, i) => (
+                  <li key={i} dangerouslySetInnerHTML={{ __html: item }} />
+                ))}
+              </ul>
+            ) : (
+              <ol className="list-decimal pl-4">
+                {(block.content || "").split("\n").filter(Boolean).map((item, i) => (
+                  <li key={i} dangerouslySetInnerHTML={{ __html: item }} />
+                ))}
+              </ol>
+            )}
+          </div>
           <Textarea
             value={block.content}
             onChange={(e) => onUpdate({ content: e.target.value })}
@@ -404,9 +433,67 @@ function BlockContent({ block, onUpdate }: { block: ContentBlock; onUpdate: (upd
     case "term":
       return <TermBlock block={block} onUpdate={onUpdate} />;
 
+    case "image":
+      return <ImageBlock block={block} onUpdate={onUpdate} />;
+
+    case "table":
+      return <TableBlock block={block} onUpdate={onUpdate} />;
+
     default:
       return null;
   }
+}
+
+// Image Block
+function ImageBlock({ block, onUpdate }: { block: ContentBlock; onUpdate: (updates: Partial<ContentBlock>) => void }) {
+  return (
+    <div className="py-2">
+      {block.imageSrc ? (
+        <div className="space-y-2">
+          <img 
+            src={block.imageSrc} 
+            alt={block.imageAlt || ""} 
+            className="rounded-lg max-w-full h-auto max-h-[400px] object-contain"
+          />
+          <Input
+            value={block.imageAlt || ""}
+            onChange={(e) => onUpdate({ imageAlt: e.target.value })}
+            placeholder="Подпись к изображению..."
+            className="text-sm border-0 bg-secondary/30 focus-visible:ring-1 rounded-lg"
+          />
+        </div>
+      ) : (
+        <div className="bg-muted rounded-xl p-8 text-center">
+          <ImageIcon className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground mb-2">Изображение не загружено</p>
+          <Input
+            value={block.imageSrc || ""}
+            onChange={(e) => onUpdate({ imageSrc: e.target.value })}
+            placeholder="URL изображения..."
+            className="text-sm"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Table Block
+function TableBlock({ block, onUpdate }: { block: ContentBlock; onUpdate: (updates: Partial<ContentBlock>) => void }) {
+  return (
+    <div className="py-2 overflow-x-auto">
+      {block.tableHtml ? (
+        <div 
+          className="min-w-full [&_table]:min-w-full [&_table]:text-sm [&_table]:border [&_table]:border-border [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:bg-muted [&_th]:font-semibold"
+          dangerouslySetInnerHTML={{ __html: block.tableHtml }}
+        />
+      ) : (
+        <div className="bg-muted rounded-xl p-8 text-center">
+          <p className="text-sm text-muted-foreground">Таблица не загружена</p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Callout Block
