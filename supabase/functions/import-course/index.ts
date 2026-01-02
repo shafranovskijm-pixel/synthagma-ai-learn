@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import * as mammoth from "https://esm.sh/mammoth@1.6.0";
 import * as JSZip from "https://esm.sh/jszip@3.10.1";
 
@@ -9,6 +10,9 @@ const corsHeaders = {
 
 // Hard limit to avoid CPU/worker limits when parsing many DOCX files in one request
 const MAX_FILES_PER_REQUEST = 3;
+
+const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
 // Convert plain text to HTML paragraphs
 function txtToHtml(text: string): string {
@@ -298,6 +302,55 @@ serve(async (req) => {
   }
 
   try {
+    // Authentication check
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      console.log('Missing authorization header');
+      return new Response(
+        JSON.stringify({ success: false, error: 'Требуется авторизация' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Verify user and check role
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } }
+    });
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      console.log('Invalid authentication:', authError?.message);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Неверная авторизация' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Verify user has organization or admin role
+    const { data: roleData, error: roleError } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', user.id)
+      .single();
+
+    if (roleError || !roleData) {
+      console.log('Failed to get user role:', roleError?.message);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Не удалось проверить роль пользователя' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (roleData.role !== 'organization' && roleData.role !== 'admin') {
+      console.log('User does not have required role:', roleData.role);
+      return new Response(
+        JSON.stringify({ success: false, error: 'Недостаточно прав для импорта курсов' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log(`User ${user.id} (${roleData.role}) authenticated for course import`);
+
     const contentType = req.headers.get('content-type') || '';
     
     if (!contentType.includes('multipart/form-data')) {

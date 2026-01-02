@@ -1,10 +1,7 @@
 project_id = "hnjgbnwlwoupefhzddke"
 
-[functions.create-demo-users]
-verify_jwt = false
-
 [functions.import-course]
-verify_jwt = false
+verify_jwt = true
 
 [functions.register-student]
 verify_jwt = false
