@@ -86,9 +86,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { error: error as Error | null };
   };
 
-  const signUp = async (email: string, password: string, fullName?: string, registrationType?: 'organization' | 'student') => {
+  const signUp = async (
+    email: string,
+    password: string,
+    fullName?: string,
+    registrationType?: 'organization' | 'student'
+  ) => {
     const redirectUrl = `${window.location.origin}/`;
-    const { data, error } = await supabase.auth.signUp({
+
+    const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -100,28 +106,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
     });
 
-    if (error) return { error: error as Error };
-
-    // If we have a session, finalize profile/role/org creation immediately
-    if (data.session) {
-      const { error: setupError } = await supabase.functions.invoke('complete-signup', {
-        body: {
-          full_name: fullName || '',
-          registration_type: registrationType || 'student',
-        },
-      });
-
-      if (setupError) {
-        return { error: setupError as unknown as Error };
-      }
-
-      if (data.user?.id) {
-        // Ensure client state sees the updated role for correct redirect
-        await fetchUserRole(data.user.id);
-      }
-    }
-
-    return { error: null };
+    // Profile/role/org creation is handled server-side on signup.
+    return { error: error as Error | null };
   };
 
   const signOut = async () => {

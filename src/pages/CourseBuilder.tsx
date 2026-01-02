@@ -59,7 +59,7 @@ const lessonColors = {
 export default function CourseBuilder() {
   const navigate = useNavigate();
   const { courseId } = useParams();
-  const { user, role } = useAuth();
+  const { user } = useAuth();
   const [courseTitle, setCourseTitle] = useState("");
   const [courseDescription, setCourseDescription] = useState("");
   const [lessons, setLessons] = useState<Lesson[]>([]);
@@ -245,46 +245,20 @@ export default function CourseBuilder() {
     if (organizationId) return organizationId;
     if (!user) return null;
 
-    const fetchOrgId = async () => {
-      const { data, error } = await supabase
-        .from("profiles")
-        .select("organization_id")
-        .eq("user_id", user.id)
-        .maybeSingle();
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("organization_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
 
-      if (error) {
-        console.error("Error fetching organization_id:", error);
-        return null;
-      }
-
-      return data?.organization_id ?? null;
-    };
-
-    let orgId = await fetchOrgId();
-    if (orgId) {
-      setOrganizationId(orgId);
-      return orgId;
+    if (error) {
+      console.error("Error fetching organization_id:", error);
+      return null;
     }
 
-    // Self-heal: if user is an organization manager but profile isn't linked yet, finalize signup
-    if (role === "organization") {
-      const { error: setupError } = await supabase.functions.invoke("complete-signup", {
-        body: { registration_type: "organization" },
-      });
-
-      if (setupError) {
-        console.error("complete-signup failed:", setupError);
-        return null;
-      }
-
-      orgId = await fetchOrgId();
-      if (orgId) {
-        setOrganizationId(orgId);
-        return orgId;
-      }
-    }
-
-    return null;
+    const orgId = data?.organization_id ?? null;
+    if (orgId) setOrganizationId(orgId);
+    return orgId;
   };
 
   const saveCourse = async () => {

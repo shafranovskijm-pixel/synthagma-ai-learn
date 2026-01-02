@@ -380,6 +380,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      current_organization_id: { Args: never; Returns: string }
       get_test_questions: { Args: { p_lesson_id: string }; Returns: Json }
       get_user_role: {
         Args: { _user_id: string }
