@@ -48,7 +48,10 @@ export function SigmaLogo({
           sizeClasses[size]
         )}
       >
-        <div className="flex items-center justify-center w-full h-full rounded-[10px] bg-card">
+        <div className={cn(
+          "flex items-center justify-center w-full h-full rounded-[10px]",
+          variant === "white" ? "bg-white/20" : "bg-card"
+        )}>
           <span 
             className={cn(
               "font-display font-bold bg-gradient-to-br bg-clip-text text-transparent",
