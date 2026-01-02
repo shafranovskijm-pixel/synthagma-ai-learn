@@ -1,4 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import * as mammoth from "https://esm.sh/mammoth@1.6.0";
+import * as JSZip from "https://esm.sh/jszip@3.10.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -19,7 +21,7 @@ function txtToHtml(text: string): string {
 }
 
 // Split HTML content into sections based on headings or paragraph count
-function splitIntoSections(sourceHtml: string, maxChars: number = 6000): Array<{title: string, html: string}> {
+function splitIntoSections(sourceHtml: string, maxChars: number = 8000): Array<{title: string, html: string}> {
   // Check for headings h1-h3
   const headingRegex = /<h[1-3][^>]*>/i;
   
@@ -53,7 +55,7 @@ function splitIntoSections(sourceHtml: string, maxChars: number = 6000): Array<{
 
       // Check text length without tags
       const textLength = buffer.replace(/<[^>]+>/g, '').length;
-      if (textLength > maxChars * 1.5) {
+      if (textLength > maxChars * 1.6) {
         flush();
       }
     }
@@ -85,43 +87,123 @@ function splitIntoSections(sourceHtml: string, maxChars: number = 6000): Array<{
   return sections;
 }
 
-// Extract text from HTML
-function htmlToText(html: string): string {
-  return html
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+// Parse DOCX using mammoth (preserves styles, tables, images)
+async function parseDocxWithMammoth(buffer: ArrayBuffer): Promise<string> {
+  try {
+    console.log('Parsing DOCX with mammoth, buffer size:', buffer.byteLength);
+    
+    // Convert image to base64 inline
+    const convertImage = mammoth.images.imgElement((image: any) => {
+      return image.read("base64").then((imageData: string) => {
+        const contentType = image.contentType || 'image/png';
+        return {
+          src: `data:${contentType};base64,${imageData}`
+        };
+      });
+    });
+
+    const result = await mammoth.convertToHtml(
+      { arrayBuffer: buffer },
+      {
+        convertImage: convertImage,
+        styleMap: [
+          "p[style-name='Heading 1'] => h1:fresh",
+          "p[style-name='Heading 2'] => h2:fresh",
+          "p[style-name='Heading 3'] => h3:fresh",
+          "p[style-name='Title'] => h1:fresh",
+          "p[style-name='Заголовок 1'] => h1:fresh",
+          "p[style-name='Заголовок 2'] => h2:fresh",
+          "p[style-name='Заголовок 3'] => h3:fresh",
+          "b => strong",
+          "i => em",
+          "u => u",
+        ]
+      }
+    );
+
+    let html = (result.value || '').trim();
+    
+    // Add classes to tables for styling
+    html = html.replace(/<table>/g, '<table class="min-w-full text-sm border border-border">');
+    html = html.replace(/<td>/g, '<td class="border border-border px-3 py-2">');
+    html = html.replace(/<th>/g, '<th class="border border-border px-3 py-2 bg-muted font-semibold">');
+    
+    // Add classes to images
+    html = html.replace(/<img([^>]+)>/g, '<img$1 class="rounded-lg max-w-full my-3">');
+
+    console.log('Mammoth conversion complete, messages:', result.messages);
+    
+    return html;
+  } catch (e) {
+    console.error('Mammoth parse error:', e);
+    throw new Error('Не удалось распарсить DOCX файл: ' + (e as Error).message);
+  }
 }
 
-// Parse DOCX using simple XML extraction (basic implementation)
-async function parseDocx(buffer: ArrayBuffer): Promise<string> {
+// Fallback DOCX parser using JSZip
+async function parseDocxFallback(buffer: ArrayBuffer): Promise<string> {
   try {
-    // DOCX is a ZIP file, we need to extract document.xml
-    // Using a simple approach - extract text from the XML
-    const uint8 = new Uint8Array(buffer);
+    const zip = await JSZip.loadAsync(buffer);
+    const docXml = await zip.file('word/document.xml')?.async('string');
     
-    // Find the document.xml content (simple approach)
-    // In a real implementation, you'd use a proper ZIP library
-    const decoder = new TextDecoder('utf-8', { fatal: false });
-    const content = decoder.decode(uint8);
-    
-    // Try to find XML content (basic extraction)
-    const docMatch = content.match(/<w:t[^>]*>([^<]*)<\/w:t>/g);
-    if (docMatch) {
-      const texts = docMatch.map(m => {
-        const textMatch = m.match(/<w:t[^>]*>([^<]*)<\/w:t>/);
-        return textMatch ? textMatch[1] : '';
-      });
-      return texts.join(' ');
+    if (!docXml) {
+      throw new Error('Не найден document.xml в DOCX');
     }
     
-    // Fallback - just decode as text
-    return decoder.decode(uint8);
+    // Extract text content and basic formatting
+    let html = '';
+    
+    // Process paragraphs
+    const paragraphs = docXml.match(/<w:p[^>]*>[\s\S]*?<\/w:p>/g) || [];
+    
+    for (const para of paragraphs) {
+      // Check for heading style
+      const styleMatch = para.match(/<w:pStyle w:val="([^"]+)"/);
+      const style = styleMatch ? styleMatch[1] : '';
+      
+      // Extract text runs
+      const runs = para.match(/<w:r[^>]*>[\s\S]*?<\/w:r>/g) || [];
+      let paraContent = '';
+      
+      for (const run of runs) {
+        const textMatches = run.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [];
+        for (const t of textMatches) {
+          const textMatch = t.match(/<w:t[^>]*>([^<]*)<\/w:t>/);
+          if (textMatch) {
+            let text = textMatch[1];
+            
+            // Check for bold
+            if (run.includes('<w:b') || run.includes('<w:b/>')) {
+              text = `<strong>${text}</strong>`;
+            }
+            // Check for italic
+            if (run.includes('<w:i') || run.includes('<w:i/>')) {
+              text = `<em>${text}</em>`;
+            }
+            
+            paraContent += text;
+          }
+        }
+      }
+      
+      if (paraContent.trim()) {
+        // Determine tag based on style
+        if (style.includes('Heading1') || style.includes('Заголовок1') || style === 'Title') {
+          html += `<h1>${paraContent}</h1>\n`;
+        } else if (style.includes('Heading2') || style.includes('Заголовок2')) {
+          html += `<h2>${paraContent}</h2>\n`;
+        } else if (style.includes('Heading3') || style.includes('Заголовок3')) {
+          html += `<h3>${paraContent}</h3>\n`;
+        } else {
+          html += `<p>${paraContent}</p>\n`;
+        }
+      }
+    }
+    
+    return html;
   } catch (e) {
-    console.error('DOCX parse error:', e);
-    throw new Error('Не удалось распарсить DOCX файл');
+    console.error('JSZip fallback error:', e);
+    throw e;
   }
 }
 
@@ -178,10 +260,15 @@ serve(async (req) => {
       
       sourceHtml = html;
     } else if (fileName.endsWith('.docx')) {
-      // DOCX file - extract text content
+      // DOCX file - use mammoth for full HTML conversion with styles, tables, images
       const buffer = await file.arrayBuffer();
-      const text = await parseDocx(buffer);
-      sourceHtml = txtToHtml(text);
+      
+      try {
+        sourceHtml = await parseDocxWithMammoth(buffer);
+      } catch (mammothError) {
+        console.log('Mammoth failed, trying fallback:', mammothError);
+        sourceHtml = await parseDocxFallback(buffer);
+      }
     } else if (fileName.endsWith('.doc')) {
       // Old DOC format - try to extract text
       const text = await file.text();
@@ -205,7 +292,7 @@ serve(async (req) => {
     }
 
     // Split into sections/lessons
-    const sections = splitIntoSections(sourceHtml, 6000);
+    const sections = splitIntoSections(sourceHtml, 8000);
 
     console.log(`Parsed ${sections.length} sections from file`);
 

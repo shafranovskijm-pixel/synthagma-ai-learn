@@ -20,14 +20,15 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
-  FileUp
+  FileUp,
+  Headphones
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 
-type LessonType = "text" | "video" | "image" | "test";
+type LessonType = "text" | "video" | "image" | "test" | "audio";
 
 interface Lesson {
   id: string;
@@ -42,6 +43,7 @@ const lessonIcons = {
   video: Video,
   image: Image,
   test: FileQuestion,
+  audio: Headphones,
 };
 
 const lessonColors = {
@@ -49,6 +51,7 @@ const lessonColors = {
   video: "text-sigma-purple bg-sigma-purple/10",
   image: "text-sigma-cyan bg-sigma-cyan/10",
   test: "text-sigma-orange bg-sigma-orange/10",
+  audio: "text-green-500 bg-green-500/10",
 };
 
 export default function CourseBuilder() {
@@ -171,10 +174,17 @@ export default function CourseBuilder() {
   }, [user, courseId]);
 
   const addLesson = (type: LessonType) => {
+    const typeNames: Record<LessonType, string> = {
+      text: "урок",
+      video: "видеоурок",
+      image: "материал",
+      test: "тест",
+      audio: "аудиолекция"
+    };
     const newLesson: Lesson = {
       id: crypto.randomUUID(),
       type,
-      title: `Новый ${type === "text" ? "урок" : type === "video" ? "видеоурок" : type === "image" ? "материал" : "тест"}`,
+      title: `Новый ${typeNames[type]}`,
       content: "",
       expanded: true,
     };
@@ -367,7 +377,7 @@ export default function CourseBuilder() {
                 <div className="flex-1">
                   <h3 className="font-display font-semibold text-lg mb-1">Импорт из файла</h3>
                   <p className="text-muted-foreground text-sm mb-4">
-                    Загрузите DOC, DOCX, HTML или TXT файл — контент будет разбит на разделы
+                    Загрузите DOC, DOCX, HTML или TXT файл — сохраняются стили, таблицы и изображения
                   </p>
                   <input
                     ref={fileInputRef}
@@ -463,17 +473,69 @@ export default function CourseBuilder() {
                         {lesson.expanded && (
                           <div className="p-4 pt-0 border-t border-border">
                             {lesson.type === "text" && (
-                              <Textarea 
-                                value={lesson.content}
-                                onChange={(e) => updateLesson(lesson.id, { content: e.target.value })}
-                                placeholder="Введите текст урока..."
-                                className="rounded-xl min-h-[150px]"
-                              />
+                              <div className="space-y-3">
+                                {/* HTML Preview */}
+                                <div 
+                                  className="prose prose-sm max-w-none dark:prose-invert bg-secondary/30 rounded-xl p-4 min-h-[150px] overflow-auto"
+                                  dangerouslySetInnerHTML={{ __html: lesson.content || '<p class="text-muted-foreground">Нет контента</p>' }}
+                                />
+                                {/* Raw HTML editor toggle */}
+                                <details className="text-sm">
+                                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                                    Редактировать HTML
+                                  </summary>
+                                  <Textarea 
+                                    value={lesson.content}
+                                    onChange={(e) => updateLesson(lesson.id, { content: e.target.value })}
+                                    placeholder="Введите текст или HTML..."
+                                    className="rounded-xl min-h-[200px] mt-2 font-mono text-xs"
+                                  />
+                                </details>
+                              </div>
                             )}
                             {lesson.type === "video" && (
-                              <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
-                                <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
-                                <p className="text-sm text-muted-foreground">Загрузите видео или вставьте ссылку</p>
+                              <div className="space-y-3">
+                                <Input
+                                  value={lesson.content}
+                                  onChange={(e) => updateLesson(lesson.id, { content: e.target.value })}
+                                  placeholder="Вставьте ссылку на видео (YouTube, Vimeo и др.)"
+                                  className="rounded-xl"
+                                />
+                                <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
+                                  <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+                                  <p className="text-sm text-muted-foreground">Или загрузите видеофайл</p>
+                                </div>
+                              </div>
+                            )}
+                            {lesson.type === "audio" && (
+                              <div className="space-y-3">
+                                <Input
+                                  value={lesson.content}
+                                  onChange={(e) => updateLesson(lesson.id, { content: e.target.value })}
+                                  placeholder="Вставьте ссылку на аудио"
+                                  className="rounded-xl"
+                                />
+                                <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
+                                  <Headphones className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+                                  <p className="text-sm text-muted-foreground">Загрузите аудиофайл (MP3, WAV, OGG)</p>
+                                  <input 
+                                    type="file" 
+                                    accept="audio/*" 
+                                    className="mt-3"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        // For now just store file name, later can upload to storage
+                                        updateLesson(lesson.id, { content: `[Audio: ${file.name}]` });
+                                      }
+                                    }}
+                                  />
+                                </div>
+                                {lesson.content && lesson.content.startsWith('http') && (
+                                  <audio controls className="w-full mt-2">
+                                    <source src={lesson.content} />
+                                  </audio>
+                                )}
                               </div>
                             )}
                             {lesson.type === "image" && (
@@ -525,6 +587,15 @@ export default function CourseBuilder() {
                   <span className="text-sm font-medium">Видео</span>
                 </button>
                 <button 
+                  onClick={() => addLesson("audio")}
+                  className="flex flex-col items-center gap-2 p-4 rounded-xl border border-border hover:border-green-500 hover:bg-green-500/5 transition-all"
+                >
+                  <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
+                    <Headphones className="w-5 h-5 text-green-500" />
+                  </div>
+                  <span className="text-sm font-medium">Аудио</span>
+                </button>
+                <button 
                   onClick={() => addLesson("image")}
                   className="flex flex-col items-center gap-2 p-4 rounded-xl border border-border hover:border-sigma-cyan hover:bg-sigma-cyan/5 transition-all"
                 >
@@ -535,7 +606,7 @@ export default function CourseBuilder() {
                 </button>
                 <button 
                   onClick={() => addLesson("test")}
-                  className="flex flex-col items-center gap-2 p-4 rounded-xl border border-border hover:border-sigma-orange hover:bg-sigma-orange/5 transition-all"
+                  className="flex flex-col items-center gap-2 p-4 rounded-xl border border-border hover:border-sigma-orange hover:bg-sigma-orange/5 transition-all col-span-2"
                 >
                   <div className="w-10 h-10 rounded-lg bg-sigma-orange/10 flex items-center justify-center">
                     <FileQuestion className="w-5 h-5 text-sigma-orange" />
