@@ -207,6 +207,88 @@ async function parseDocxFallback(buffer: ArrayBuffer): Promise<string> {
   }
 }
 
+// Process single file and return its content
+async function processFile(file: File): Promise<{ title: string; html: string; fileName: string }> {
+  const fileName = file.name.toLowerCase();
+  let sourceHtml = '';
+  let courseTitle = file.name.replace(/\.[^.]+$/, '');
+
+  console.log(`Processing file: ${fileName}, size: ${file.size}`);
+
+  if (fileName.endsWith('.txt')) {
+    const text = await file.text();
+    sourceHtml = txtToHtml(text);
+  } else if (fileName.endsWith('.html') || fileName.endsWith('.htm')) {
+    let html = await file.text();
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+    if (bodyMatch) html = bodyMatch[1];
+    const titleMatch = html.match(/<title[^>]*>(.*?)<\/title>/i);
+    if (titleMatch) courseTitle = titleMatch[1].trim() || courseTitle;
+    sourceHtml = html;
+  } else if (fileName.endsWith('.docx')) {
+    const buffer = await file.arrayBuffer();
+    try {
+      sourceHtml = await parseDocxWithMammoth(buffer);
+    } catch (mammothError) {
+      console.log('Mammoth failed, trying fallback:', mammothError);
+      sourceHtml = await parseDocxFallback(buffer);
+    }
+  } else if (fileName.endsWith('.doc')) {
+    const text = await file.text();
+    const cleanText = text.replace(/[^\x20-\x7E\u0400-\u04FF\n\r\t]/g, ' ').replace(/\s+/g, ' ');
+    sourceHtml = txtToHtml(cleanText);
+  } else {
+    throw new Error(`Неподдерживаемый формат: ${file.name}`);
+  }
+
+  return { title: courseTitle, html: sourceHtml, fileName: file.name };
+}
+
+// Analyze content structure to suggest optimal organization
+function analyzeContentStructure(files: Array<{ title: string; html: string; fileName: string }>) {
+  const analysis = files.map(file => {
+    const text = file.html.replace(/<[^>]+>/g, '');
+    const wordCount = text.split(/\s+/).filter(w => w).length;
+    const hasHeadings = /<h[1-3][^>]*>/i.test(file.html);
+    const headingCount = (file.html.match(/<h[1-3][^>]*>/gi) || []).length;
+    const hasTables = /<table/i.test(file.html);
+    const hasImages = /<img/i.test(file.html);
+    const hasLists = /<[ou]l/i.test(file.html);
+    
+    // Detect content type
+    let contentType: 'lecture' | 'reference' | 'summary' | 'mixed' = 'mixed';
+    if (wordCount > 2000 && hasHeadings) contentType = 'lecture';
+    else if (hasTables && wordCount < 1000) contentType = 'reference';
+    else if (wordCount < 500) contentType = 'summary';
+    
+    return {
+      ...file,
+      wordCount,
+      hasHeadings,
+      headingCount,
+      hasTables,
+      hasImages,
+      hasLists,
+      contentType,
+    };
+  });
+
+  // Sort by: lectures first, then by heading count, then alphabetically
+  analysis.sort((a, b) => {
+    const typeOrder = { lecture: 0, mixed: 1, reference: 2, summary: 3 };
+    if (typeOrder[a.contentType] !== typeOrder[b.contentType]) {
+      return typeOrder[a.contentType] - typeOrder[b.contentType];
+    }
+    // Try to detect numbering in file names
+    const numA = a.fileName.match(/(\d+)/)?.[1];
+    const numB = b.fileName.match(/(\d+)/)?.[1];
+    if (numA && numB) return parseInt(numA) - parseInt(numB);
+    return a.title.localeCompare(b.title, 'ru');
+  });
+
+  return analysis;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -223,94 +305,101 @@ serve(async (req) => {
     }
 
     const formData = await req.formData();
-    const file = formData.get('file') as File | null;
+    
+    // Collect all files (support both 'file' and 'files' fields, and multiple files)
+    const files: File[] = [];
+    for (const [key, value] of formData.entries()) {
+      if (value instanceof File && value.size > 0) {
+        files.push(value);
+      }
+    }
 
-    if (!file) {
+    if (files.length === 0) {
       return new Response(
-        JSON.stringify({ success: false, error: 'Файл не загружен' }),
+        JSON.stringify({ success: false, error: 'Файлы не загружены' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const fileName = file.name.toLowerCase();
-    let sourceHtml = '';
-    let courseTitle = file.name.replace(/\.[^.]+$/, '');
+    console.log(`Processing ${files.length} files`);
 
-    console.log(`Processing file: ${fileName}, size: ${file.size}`);
+    // Process all files in parallel
+    const processedFiles = await Promise.all(
+      files.map(async (file) => {
+        try {
+          return await processFile(file);
+        } catch (e) {
+          console.error(`Error processing ${file.name}:`, e);
+          return null;
+        }
+      })
+    );
 
-    if (fileName.endsWith('.txt')) {
-      // Plain text file
-      const text = await file.text();
-      sourceHtml = txtToHtml(text);
-    } else if (fileName.endsWith('.html') || fileName.endsWith('.htm')) {
-      // HTML file - extract body content
-      let html = await file.text();
-      
-      // Extract body content if present
-      const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-      if (bodyMatch) {
-        html = bodyMatch[1];
-      }
-      
-      // Extract title if present
-      const titleMatch = html.match(/<title[^>]*>(.*?)<\/title>/i);
-      if (titleMatch) {
-        courseTitle = titleMatch[1].trim() || courseTitle;
-      }
-      
-      sourceHtml = html;
-    } else if (fileName.endsWith('.docx')) {
-      // DOCX file - use mammoth for full HTML conversion with styles, tables, images
-      const buffer = await file.arrayBuffer();
-      
-      try {
-        sourceHtml = await parseDocxWithMammoth(buffer);
-      } catch (mammothError) {
-        console.log('Mammoth failed, trying fallback:', mammothError);
-        sourceHtml = await parseDocxFallback(buffer);
-      }
-    } else if (fileName.endsWith('.doc')) {
-      // Old DOC format - try to extract text
-      const text = await file.text();
-      // Filter out binary garbage
-      const cleanText = text.replace(/[^\x20-\x7E\u0400-\u04FF\n\r\t]/g, ' ').replace(/\s+/g, ' ');
-      sourceHtml = txtToHtml(cleanText);
-    } else if (fileName.endsWith('.pdf')) {
-      // PDF - return message that we need additional processing
+    // Filter out failed files
+    const validFiles = processedFiles.filter((f): f is NonNullable<typeof f> => f !== null);
+
+    if (validFiles.length === 0) {
       return new Response(
-        JSON.stringify({ 
-          success: false, 
-          error: 'PDF файлы требуют дополнительной обработки. Пожалуйста, сконвертируйте в DOCX или TXT.' 
-        }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    } else {
-      return new Response(
-        JSON.stringify({ success: false, error: 'Неподдерживаемый формат файла. Поддерживаются: .docx, .doc, .txt, .html' }),
+        JSON.stringify({ success: false, error: 'Не удалось обработать ни один файл' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Split into sections/lessons
-    const sections = splitIntoSections(sourceHtml, 8000);
+    // Analyze and organize content structure
+    const analyzedFiles = analyzeContentStructure(validFiles);
 
-    console.log(`Parsed ${sections.length} sections from file`);
+    // Create lessons - 1 file = 1 lesson with all its sections combined
+    const lessons = analyzedFiles.map((file, index) => {
+      // Split into sections but keep them as one lesson
+      const sections = splitIntoSections(file.html, 8000);
+      const combinedHtml = sections.map(s => s.html).join('\n');
+      
+      return {
+        id: crypto.randomUUID(),
+        type: 'text',
+        title: file.title,
+        content: combinedHtml,
+        order_index: index,
+        metadata: {
+          wordCount: file.wordCount,
+          contentType: file.contentType,
+          hasHeadings: file.hasHeadings,
+          hasTables: file.hasTables,
+          hasImages: file.hasImages,
+          fileName: file.fileName,
+        }
+      };
+    });
 
-    // Convert sections to lessons format
-    const lessons = sections.map((section, index) => ({
-      id: crypto.randomUUID(),
-      type: 'text',
-      title: section.title,
-      content: section.html,
-      order_index: index,
-    }));
+    // Suggest course title based on common prefix or first file
+    let suggestedCourseTitle = '';
+    if (lessons.length > 1) {
+      // Try to find common prefix in file names
+      const titles = analyzedFiles.map(f => f.title);
+      const prefix = findCommonPrefix(titles);
+      if (prefix.length > 3) {
+        suggestedCourseTitle = prefix.trim();
+      }
+    }
+    if (!suggestedCourseTitle && lessons.length > 0) {
+      suggestedCourseTitle = lessons[0].title;
+    }
+
+    console.log(`Processed ${lessons.length} lessons from ${files.length} files`);
 
     return new Response(
       JSON.stringify({
         success: true,
-        courseTitle,
+        courseTitle: suggestedCourseTitle,
         lessons,
-        sectionsCount: sections.length,
+        filesCount: files.length,
+        sectionsCount: lessons.length,
+        analysis: analyzedFiles.map(f => ({
+          fileName: f.fileName,
+          title: f.title,
+          wordCount: f.wordCount,
+          contentType: f.contentType,
+        })),
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
@@ -326,3 +415,19 @@ serve(async (req) => {
     );
   }
 });
+
+// Find common prefix in array of strings
+function findCommonPrefix(strings: string[]): string {
+  if (strings.length === 0) return '';
+  if (strings.length === 1) return strings[0];
+  
+  let prefix = strings[0];
+  for (let i = 1; i < strings.length; i++) {
+    while (!strings[i].startsWith(prefix)) {
+      prefix = prefix.slice(0, -1);
+      if (prefix === '') return '';
+    }
+  }
+  // Clean up trailing numbers/punctuation
+  return prefix.replace(/[\s\d._-]+$/, '');
+}
