@@ -27,6 +27,7 @@ import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import { BlockEditor, ContentBlock, htmlToBlocks, blocksToJson, jsonToBlocks } from "@/components/course-builder/BlockEditor";
 
 type LessonType = "text" | "video" | "image" | "test" | "audio";
 
@@ -36,6 +37,7 @@ interface Lesson {
   title: string;
   content: string;
   expanded: boolean;
+  blocks?: ContentBlock[]; // Block-based content
 }
 
 const lessonIcons = {
@@ -98,14 +100,18 @@ export default function CourseBuilder() {
         setCourseTitle(data.courseTitle);
       }
 
-      // Add imported lessons
-      const importedLessons: Lesson[] = data.lessons.map((l: any) => ({
-        id: l.id,
-        type: l.type as LessonType,
-        title: l.title,
-        content: l.content,
-        expanded: false,
-      }));
+      // Add imported lessons - convert HTML to blocks
+      const importedLessons: Lesson[] = data.lessons.map((l: any) => {
+        const blocks = htmlToBlocks(l.content || "");
+        return {
+          id: l.id,
+          type: l.type as LessonType,
+          title: l.title,
+          content: blocksToJson(blocks), // Store as JSON
+          blocks: blocks,
+          expanded: false,
+        };
+      });
 
       setLessons(prev => [...prev, ...importedLessons]);
       toast.success(`Импортировано ${data.sectionsCount} разделов`);
@@ -158,13 +164,17 @@ export default function CourseBuilder() {
           .order("order_index");
 
         if (lessonsData) {
-          setLessons(lessonsData.map(l => ({
-            id: l.id,
-            type: l.type as LessonType,
-            title: l.title,
-            content: l.content || "",
-            expanded: false
-          })));
+          setLessons(lessonsData.map(l => {
+            const blocks = l.content ? jsonToBlocks(l.content) : [];
+            return {
+              id: l.id,
+              type: l.type as LessonType,
+              title: l.title,
+              content: l.content || "",
+              blocks: blocks.length > 0 ? blocks : undefined,
+              expanded: false
+            };
+          }));
         }
         setIsLoading(false);
       }
@@ -187,6 +197,7 @@ export default function CourseBuilder() {
       title: `Новый ${typeNames[type]}`,
       content: "",
       expanded: true,
+      blocks: type === "text" ? [] : undefined,
     };
     setLessons([...lessons, newLesson]);
   };
@@ -474,23 +485,13 @@ export default function CourseBuilder() {
                           <div className="p-4 pt-0 border-t border-border">
                             {lesson.type === "text" && (
                               <div className="space-y-3">
-                                {/* HTML Preview */}
-                                <div 
-                                  className="prose prose-sm max-w-none dark:prose-invert bg-secondary/30 rounded-xl p-4 min-h-[150px] overflow-auto"
-                                  dangerouslySetInnerHTML={{ __html: lesson.content || '<p class="text-muted-foreground">Нет контента</p>' }}
+                                <BlockEditor
+                                  blocks={lesson.blocks || []}
+                                  onChange={(blocks) => updateLesson(lesson.id, { 
+                                    blocks,
+                                    content: blocksToJson(blocks) 
+                                  })}
                                 />
-                                {/* Raw HTML editor toggle */}
-                                <details className="text-sm">
-                                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                                    Редактировать HTML
-                                  </summary>
-                                  <Textarea 
-                                    value={lesson.content}
-                                    onChange={(e) => updateLesson(lesson.id, { content: e.target.value })}
-                                    placeholder="Введите текст или HTML..."
-                                    className="rounded-xl min-h-[200px] mt-2 font-mono text-xs"
-                                  />
-                                </details>
                               </div>
                             )}
                             {lesson.type === "video" && (
