@@ -105,10 +105,18 @@ export default function OrganizationDashboard() {
   const [newStudentName, setNewStudentName] = useState("");
   const [newStudentEmail, setNewStudentEmail] = useState("");
   const [selectedCourseId, setSelectedCourseId] = useState<string>("");
+  
+  // Statistics state
+  const [stats, setStats] = useState({
+    totalStudents: 0,
+    totalCourses: 0,
+    completedCount: 0,
+    averageProgress: 0
+  });
 
-  // Fetch courses from database
+  // Fetch courses and stats from database
   useEffect(() => {
-    const fetchCourses = async () => {
+    const fetchCoursesAndStats = async () => {
       if (!user) return;
 
       try {
@@ -124,6 +132,8 @@ export default function OrganizationDashboard() {
           return;
         }
 
+        const organizationId = profile.organization_id;
+
         // Fetch courses for organization
         const { data: coursesData, error } = await supabase
           .from("courses")
@@ -131,31 +141,52 @@ export default function OrganizationDashboard() {
             *,
             lessons(count)
           `)
-          .eq("organization_id", profile.organization_id)
+          .eq("organization_id", organizationId)
           .order("created_at", { ascending: false });
 
         if (error) throw error;
 
-        // Get enrollment counts
-        const coursesWithStats = await Promise.all(
-          (coursesData || []).map(async (course: any) => {
-            const { count } = await supabase
-              .from("enrollments")
-              .select("*", { count: "exact", head: true })
-              .eq("course_id", course.id);
+        const courseIds = (coursesData || []).map((c: any) => c.id);
+        
+        // Get all enrollments for organization's courses
+        let allEnrollments: any[] = [];
+        if (courseIds.length > 0) {
+          const { data: enrollmentsData } = await supabase
+            .from("enrollments")
+            .select("*")
+            .in("course_id", courseIds);
+          allEnrollments = enrollmentsData || [];
+        }
 
-            return {
-              id: course.id,
-              title: course.title,
-              description: course.description,
-              is_published: course.is_published,
-              created_at: course.created_at,
-              lessonsCount: course.lessons?.[0]?.count || 0,
-              studentsCount: count || 0,
-              duration: course.duration || "—",
-            };
-          })
-        );
+        // Calculate stats
+        const totalStudents = allEnrollments.length;
+        const totalCourses = coursesData?.length || 0;
+        const completedCount = allEnrollments.filter(e => e.status === 'completed').length;
+        const averageProgress = totalStudents > 0 
+          ? Math.round(allEnrollments.reduce((sum, e) => sum + (e.progress || 0), 0) / totalStudents)
+          : 0;
+
+        setStats({
+          totalStudents,
+          totalCourses,
+          completedCount,
+          averageProgress
+        });
+
+        // Get enrollment counts per course
+        const coursesWithStats = (coursesData || []).map((course: any) => {
+          const courseEnrollments = allEnrollments.filter(e => e.course_id === course.id);
+          return {
+            id: course.id,
+            title: course.title,
+            description: course.description,
+            is_published: course.is_published,
+            created_at: course.created_at,
+            lessonsCount: course.lessons?.[0]?.count || 0,
+            studentsCount: courseEnrollments.length,
+            duration: course.duration || "—",
+          };
+        });
 
         setCourses(coursesWithStats);
       } catch (error) {
@@ -166,7 +197,7 @@ export default function OrganizationDashboard() {
       }
     };
 
-    fetchCourses();
+    fetchCoursesAndStats();
   }, [user]);
 
   const handleLogout = async () => {
@@ -382,7 +413,7 @@ export default function OrganizationDashboard() {
                   <Users className="w-6 h-6 text-primary" />
                 </div>
                 <div>
-                  <div className="text-2xl font-bold font-display">156</div>
+                  <div className="text-2xl font-bold font-display">{stats.totalStudents}</div>
                   <div className="text-muted-foreground text-sm">Учеников</div>
                 </div>
               </div>
@@ -393,7 +424,7 @@ export default function OrganizationDashboard() {
                   <BookOpen className="w-6 h-6 text-accent" />
                 </div>
                 <div>
-                  <div className="text-2xl font-bold font-display">12</div>
+                  <div className="text-2xl font-bold font-display">{stats.totalCourses}</div>
                   <div className="text-muted-foreground text-sm">Курсов</div>
                 </div>
               </div>
@@ -404,7 +435,7 @@ export default function OrganizationDashboard() {
                   <CheckCircle2 className="w-6 h-6 text-sigma-green" />
                 </div>
                 <div>
-                  <div className="text-2xl font-bold font-display">89</div>
+                  <div className="text-2xl font-bold font-display">{stats.completedCount}</div>
                   <div className="text-muted-foreground text-sm">Завершили</div>
                 </div>
               </div>
@@ -415,7 +446,7 @@ export default function OrganizationDashboard() {
                   <TrendingUp className="w-6 h-6 text-sigma-orange" />
                 </div>
                 <div>
-                  <div className="text-2xl font-bold font-display">72%</div>
+                  <div className="text-2xl font-bold font-display">{stats.averageProgress}%</div>
                   <div className="text-muted-foreground text-sm">Ср. прогресс</div>
                 </div>
               </div>
