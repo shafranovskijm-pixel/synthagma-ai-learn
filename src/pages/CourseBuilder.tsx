@@ -59,7 +59,7 @@ const lessonColors = {
 export default function CourseBuilder() {
   const navigate = useNavigate();
   const { courseId } = useParams();
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const [courseTitle, setCourseTitle] = useState("");
   const [courseDescription, setCourseDescription] = useState("");
   const [lessons, setLessons] = useState<Lesson[]>([]);
@@ -241,13 +241,60 @@ export default function CourseBuilder() {
     setLessons(lessons.map(l => l.id === id ? { ...l, expanded: !l.expanded } : l));
   };
 
+  const ensureOrganizationId = async (): Promise<string | null> => {
+    if (organizationId) return organizationId;
+    if (!user) return null;
+
+    const fetchOrgId = async () => {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("organization_id")
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (error) {
+        console.error("Error fetching organization_id:", error);
+        return null;
+      }
+
+      return data?.organization_id ?? null;
+    };
+
+    let orgId = await fetchOrgId();
+    if (orgId) {
+      setOrganizationId(orgId);
+      return orgId;
+    }
+
+    // Self-heal: if user is an organization manager but profile isn't linked yet, finalize signup
+    if (role === "organization") {
+      const { error: setupError } = await supabase.functions.invoke("complete-signup", {
+        body: { registration_type: "organization" },
+      });
+
+      if (setupError) {
+        console.error("complete-signup failed:", setupError);
+        return null;
+      }
+
+      orgId = await fetchOrgId();
+      if (orgId) {
+        setOrganizationId(orgId);
+        return orgId;
+      }
+    }
+
+    return null;
+  };
+
   const saveCourse = async () => {
     if (!courseTitle.trim()) {
       toast.error("Введите название курса");
       return;
     }
 
-    if (!organizationId) {
+    const orgId = await ensureOrganizationId();
+    if (!orgId) {
       toast.error("Не найдена организация");
       return;
     }
@@ -278,7 +325,7 @@ export default function CourseBuilder() {
           .insert({
             title: courseTitle.trim(),
             description: courseDescription.trim() || null,
-            organization_id: organizationId,
+            organization_id: orgId,
           })
           .select()
           .single();
@@ -317,7 +364,8 @@ export default function CourseBuilder() {
 
   // Save single lesson (creates course if needed)
   const saveSingleLesson = async (lesson: Lesson, orderIndex: number) => {
-    if (!organizationId) {
+    const orgId = await ensureOrganizationId();
+    if (!orgId) {
       toast.error("Не найдена организация");
       return;
     }
@@ -332,20 +380,20 @@ export default function CourseBuilder() {
         if (!courseTitle.trim()) {
           setCourseTitle(lesson.title || "Новый курс");
         }
-        
+
         const { data: newCourse, error } = await supabase
           .from("courses")
           .insert({
             title: courseTitle.trim() || lesson.title || "Новый курс",
             description: courseDescription.trim() || null,
-            organization_id: organizationId,
+            organization_id: orgId,
           })
           .select()
           .single();
 
         if (error) throw error;
         savedCourseId = newCourse.id;
-        
+
         // Update URL without navigation to keep state
         window.history.replaceState(null, '', `/course-builder/${savedCourseId}`);
       }
