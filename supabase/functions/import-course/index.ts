@@ -10,6 +10,9 @@ const corsHeaders = {
 
 // Hard limit to avoid CPU/worker limits when parsing many DOCX files in one request
 const MAX_FILES_PER_REQUEST = 3;
+// File size limits to prevent resource exhaustion
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
+const MAX_TOTAL_SIZE = 25 * 1024 * 1024; // 25MB total
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -362,10 +365,38 @@ serve(async (req) => {
 
     const formData = await req.formData();
     
-    // Collect all files (support both 'file' and 'files' fields, and multiple files)
+    // Collect all files with size validation
     const files: File[] = [];
+    let totalSize = 0;
+    
     for (const [key, value] of formData.entries()) {
       if (value instanceof File && value.size > 0) {
+        // Check individual file size
+        if (value.size > MAX_FILE_SIZE) {
+          console.log(`File ${value.name} exceeds size limit: ${value.size} bytes`);
+          return new Response(
+            JSON.stringify({ 
+              success: false, 
+              error: `Файл "${value.name}" превышает лимит 10МБ (${(value.size / 1024 / 1024).toFixed(1)}МБ)` 
+            }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        
+        totalSize += value.size;
+        
+        // Check total size limit
+        if (totalSize > MAX_TOTAL_SIZE) {
+          console.log(`Total upload size exceeds limit: ${totalSize} bytes`);
+          return new Response(
+            JSON.stringify({ 
+              success: false, 
+              error: `Общий размер файлов превышает лимит 25МБ` 
+            }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        
         files.push(value);
       }
     }
@@ -386,6 +417,8 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+    
+    console.log(`Files validated: ${files.length} files, total size: ${(totalSize / 1024 / 1024).toFixed(2)}MB`);
 
     console.log(`Processing ${files.length} files`);
 
