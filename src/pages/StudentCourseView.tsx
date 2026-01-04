@@ -607,26 +607,31 @@ export default function StudentCourseView() {
                         <div key={q.id} className="bg-secondary/30 rounded-xl p-6">
                           <p className="font-medium mb-4">{qIdx + 1}. {q.question}</p>
                           <div className="space-y-2">
-                            {q.options.map((opt, optIdx) => (
-                              <label
-                                key={optIdx}
-                                className={cn(
-                                  "flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors",
-                                  userAnswers[q.id] === optIdx
-                                    ? "bg-primary/10 border border-primary"
-                                    : "bg-background hover:bg-secondary/50 border border-transparent"
-                                )}
-                              >
-                                <input
-                                  type="radio"
-                                  name={q.id}
-                                  checked={userAnswers[q.id] === optIdx}
-                                  onChange={() => setUserAnswers(prev => ({ ...prev, [q.id]: optIdx }))}
-                                  className="w-4 h-4"
-                                />
-                                <span>{opt}</span>
-                              </label>
-                            ))}
+                            {q.options.map((opt, optIdx) => {
+                              const optionText = typeof opt === "object" && opt && "text" in opt 
+                                ? (opt as { text: string }).text 
+                                : String(opt ?? "");
+                              return (
+                                <label
+                                  key={optIdx}
+                                  className={cn(
+                                    "flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors",
+                                    userAnswers[q.id] === optIdx
+                                      ? "bg-primary/10 border border-primary"
+                                      : "bg-background hover:bg-secondary/50 border border-transparent"
+                                  )}
+                                >
+                                  <input
+                                    type="radio"
+                                    name={q.id}
+                                    checked={userAnswers[q.id] === optIdx}
+                                    onChange={() => setUserAnswers(prev => ({ ...prev, [q.id]: optIdx }))}
+                                    className="w-4 h-4"
+                                  />
+                                  <span>{optionText}</span>
+                                </label>
+                              );
+                            })}
                           </div>
                         </div>
                       ))}
