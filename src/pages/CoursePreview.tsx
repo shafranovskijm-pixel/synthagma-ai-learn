@@ -111,7 +111,13 @@ export default function CoursePreview() {
 
         setTestQuestions((questions || []).map(q => ({
           ...q,
-          options: Array.isArray(q.options) ? q.options as string[] : []
+          options: Array.isArray(q.options) 
+            ? q.options.map((opt: unknown) => 
+                typeof opt === 'object' && opt !== null && 'text' in opt 
+                  ? (opt as { text: string }).text 
+                  : String(opt)
+              )
+            : []
         })));
         setPreviewAnswers({});
       } catch (error) {
