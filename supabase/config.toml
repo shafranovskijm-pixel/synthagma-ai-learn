@@ -5,3 +5,6 @@ verify_jwt = true
 
 [functions.register-student]
 verify_jwt = false
+
+[functions.gigachat]
+verify_jwt = false
