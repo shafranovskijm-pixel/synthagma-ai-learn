@@ -7,11 +7,13 @@ import {
   Loader2,
   ChevronRight,
   CheckCircle2,
+  XCircle,
   BookOpen,
   Menu,
   X,
   Edit,
   Eye,
+  RotateCcw,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { BlockEditor, jsonToBlocks } from "@/components/course-builder/BlockEditor";
@@ -32,6 +34,7 @@ interface TestQuestion {
   question: string;
   options: string[];
   order_index: number;
+  correct_answer: number;
 }
 
 interface Course {
@@ -52,6 +55,7 @@ export default function CoursePreview() {
   // Test preview state
   const [testQuestions, setTestQuestions] = useState<TestQuestion[]>([]);
   const [previewAnswers, setPreviewAnswers] = useState<Record<string, number>>({});
+  const [testSubmitted, setTestSubmitted] = useState(false);
 
   useEffect(() => {
     const fetchCourse = async () => {
@@ -105,7 +109,7 @@ export default function CoursePreview() {
       try {
         const { data: questions } = await supabase
           .from("test_questions")
-          .select("id, question, options, order_index")
+          .select("id, question, options, order_index, correct_answer")
           .eq("lesson_id", selectedLessonId)
           .order("order_index");
 
@@ -120,6 +124,7 @@ export default function CoursePreview() {
             : []
         })));
         setPreviewAnswers({});
+        setTestSubmitted(false);
       } catch (error) {
         console.error("Error fetching questions:", error);
       }
@@ -294,36 +299,106 @@ export default function CoursePreview() {
                     </div>
                   ) : (
                     <>
-                      {testQuestions.map((q, qIdx) => (
-                        <div key={q.id} className="bg-secondary/30 rounded-xl p-6">
-                          <p className="font-medium mb-4">{qIdx + 1}. {q.question}</p>
-                          <div className="space-y-2">
-                            {q.options.map((opt, optIdx) => (
-                              <label
-                                key={optIdx}
-                                className={cn(
-                                  "flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors",
-                                  previewAnswers[q.id] === optIdx
-                                    ? "bg-primary/10 border border-primary"
-                                    : "bg-background hover:bg-secondary/50 border border-transparent"
-                                )}
-                              >
-                                <input
-                                  type="radio"
-                                  name={q.id}
-                                  checked={previewAnswers[q.id] === optIdx}
-                                  onChange={() => setPreviewAnswers(prev => ({ ...prev, [q.id]: optIdx }))}
-                                  className="w-4 h-4"
-                                />
-                                <span>{opt}</span>
-                              </label>
-                            ))}
+                      {testSubmitted && (
+                        <div className="bg-primary/10 border border-primary rounded-xl p-6 mb-4">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h3 className="font-display font-semibold text-lg">Результат теста</h3>
+                              <p className="text-muted-foreground text-sm mt-1">
+                                Правильных ответов: {testQuestions.filter(q => previewAnswers[q.id] === q.correct_answer).length} из {testQuestions.length}
+                              </p>
+                            </div>
+                            <div className="text-3xl font-bold text-primary">
+                              {Math.round((testQuestions.filter(q => previewAnswers[q.id] === q.correct_answer).length / testQuestions.length) * 100)}%
+                            </div>
                           </div>
+                          <Button 
+                            variant="outline" 
+                            className="mt-4 gap-2"
+                            onClick={() => {
+                              setPreviewAnswers({});
+                              setTestSubmitted(false);
+                            }}
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                            Пройти заново
+                          </Button>
                         </div>
-                      ))}
-                      <div className="p-4 bg-muted/50 rounded-xl text-center text-sm text-muted-foreground">
-                        Это предпросмотр теста. Ответы не сохраняются.
-                      </div>
+                      )}
+                      {testQuestions.map((q, qIdx) => {
+                        const isCorrect = previewAnswers[q.id] === q.correct_answer;
+                        const isAnswered = previewAnswers[q.id] !== undefined;
+                        return (
+                          <div 
+                            key={q.id} 
+                            className={cn(
+                              "rounded-xl p-6 transition-colors",
+                              testSubmitted && isAnswered
+                                ? isCorrect 
+                                  ? "bg-green-500/10 border border-green-500/30"
+                                  : "bg-red-500/10 border border-red-500/30"
+                                : "bg-secondary/30"
+                            )}
+                          >
+                            <div className="flex items-start gap-3 mb-4">
+                              <p className="font-medium flex-1">{qIdx + 1}. {q.question}</p>
+                              {testSubmitted && isAnswered && (
+                                isCorrect 
+                                  ? <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
+                                  : <XCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                              )}
+                            </div>
+                            <div className="space-y-2">
+                              {q.options.map((opt, optIdx) => (
+                                <label
+                                  key={optIdx}
+                                  className={cn(
+                                    "flex items-center gap-3 p-3 rounded-lg transition-colors",
+                                    testSubmitted ? "cursor-default" : "cursor-pointer",
+                                    testSubmitted && optIdx === q.correct_answer
+                                      ? "bg-green-500/20 border border-green-500"
+                                      : testSubmitted && previewAnswers[q.id] === optIdx && optIdx !== q.correct_answer
+                                        ? "bg-red-500/20 border border-red-500"
+                                        : previewAnswers[q.id] === optIdx
+                                          ? "bg-primary/10 border border-primary"
+                                          : "bg-background hover:bg-secondary/50 border border-transparent"
+                                  )}
+                                >
+                                  <input
+                                    type="radio"
+                                    name={q.id}
+                                    checked={previewAnswers[q.id] === optIdx}
+                                    onChange={() => !testSubmitted && setPreviewAnswers(prev => ({ ...prev, [q.id]: optIdx }))}
+                                    disabled={testSubmitted}
+                                    className="w-4 h-4"
+                                  />
+                                  <span>{opt}</span>
+                                  {testSubmitted && optIdx === q.correct_answer && (
+                                    <span className="ml-auto text-xs text-green-600 font-medium">Правильный ответ</span>
+                                  )}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {!testSubmitted && (
+                        <div className="flex flex-col items-center gap-4">
+                          <Button 
+                            onClick={() => setTestSubmitted(true)}
+                            disabled={Object.keys(previewAnswers).length < testQuestions.length}
+                            className="w-full sm:w-auto"
+                          >
+                            Завершить тест
+                          </Button>
+                          <p className="text-sm text-muted-foreground">
+                            {Object.keys(previewAnswers).length < testQuestions.length 
+                              ? `Ответьте на все вопросы (${Object.keys(previewAnswers).length}/${testQuestions.length})`
+                              : "Это предпросмотр теста. Ответы не сохраняются."
+                            }
+                          </p>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
