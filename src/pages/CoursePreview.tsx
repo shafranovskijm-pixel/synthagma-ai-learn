@@ -64,28 +64,22 @@ export default function CoursePreview() {
         return;
       }
 
-      const { data: courseData, error: courseError } = await supabase
-        .from("courses")
-        .select("*")
-        .eq("id", courseId)
-        .single();
+      // Параллельная загрузка курса и уроков
+      const [courseResult, lessonsResult] = await Promise.all([
+        supabase.from("courses").select("id, title, description").eq("id", courseId).single(),
+        supabase.from("lessons").select("id, title, type, content, order_index").eq("course_id", courseId).order("order_index")
+      ]);
 
-      if (courseError || !courseData) {
+      if (courseResult.error || !courseResult.data) {
         navigate("/organization");
         return;
       }
 
-      setCourse(courseData);
+      setCourse(courseResult.data);
 
-      const { data: lessonsData } = await supabase
-        .from("lessons")
-        .select("*")
-        .eq("course_id", courseId)
-        .order("order_index");
-
-      if (lessonsData && lessonsData.length > 0) {
-        setLessons(lessonsData);
-        setSelectedLessonId(lessonsData[0].id);
+      if (lessonsResult.data && lessonsResult.data.length > 0) {
+        setLessons(lessonsResult.data);
+        setSelectedLessonId(lessonsResult.data[0].id);
       }
 
       setIsLoading(false);
@@ -410,18 +404,29 @@ export default function CoursePreview() {
               )}
 
               {/* Navigation */}
-              <div className="flex justify-between mt-8 pt-6 border-t border-border">
-                {currentIndex > 0 ? (
-                  <Button variant="outline" onClick={goToPrevLesson}>
-                    ← Предыдущий урок
-                  </Button>
-                ) : <div />}
+              <div className="flex flex-col gap-4 mt-8 pt-6 border-t border-border">
+                <Button 
+                  onClick={goToNextLesson}
+                  className="w-full gap-2"
+                  size="lg"
+                >
+                  <CheckCircle2 className="w-5 h-5" />
+                  {currentIndex < lessons.length - 1 ? "Завершить урок и продолжить" : "Завершить курс"}
+                </Button>
                 
-                {currentIndex < lessons.length - 1 && (
-                  <Button onClick={goToNextLesson}>
-                    Следующий урок →
-                  </Button>
-                )}
+                <div className="flex justify-between">
+                  {currentIndex > 0 ? (
+                    <Button variant="outline" onClick={goToPrevLesson}>
+                      ← Предыдущий урок
+                    </Button>
+                  ) : <div />}
+                  
+                  {currentIndex < lessons.length - 1 && (
+                    <Button variant="ghost" onClick={goToNextLesson}>
+                      Пропустить →
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           ) : (
