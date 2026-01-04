@@ -94,6 +94,8 @@ function SortableLessonItem({
   onDelete,
   courseId
 }: SortableLessonProps) {
+  const [isPreviewMode, setIsPreviewMode] = useState(false);
+  
   const {
     attributes,
     listeners,
@@ -173,13 +175,42 @@ function SortableLessonItem({
         <div className="p-4 pt-0 border-t border-border">
           {lesson.type === "text" && (
             <div className="space-y-3">
-              <BlockEditor
-                blocks={lesson.blocks || []}
-                onChange={(blocks) => onUpdate({ 
-                  blocks,
-                  content: blocksToJson(blocks) 
-                })}
-              />
+              <div className="flex items-center gap-2 mb-2">
+                <Button
+                  variant={isPreviewMode ? "outline" : "default"}
+                  size="sm"
+                  className="rounded-lg text-xs"
+                  onClick={() => setIsPreviewMode(false)}
+                >
+                  Редактор
+                </Button>
+                <Button
+                  variant={isPreviewMode ? "default" : "outline"}
+                  size="sm"
+                  className="rounded-lg text-xs gap-1"
+                  onClick={() => setIsPreviewMode(true)}
+                >
+                  <Eye className="w-3 h-3" />
+                  Предпросмотр
+                </Button>
+              </div>
+              {isPreviewMode ? (
+                <div className="bg-secondary/30 rounded-xl p-6 prose prose-sm dark:prose-invert max-w-none">
+                  <BlockEditor
+                    blocks={lesson.blocks || []}
+                    onChange={() => {}}
+                    readOnly
+                  />
+                </div>
+              ) : (
+                <BlockEditor
+                  blocks={lesson.blocks || []}
+                  onChange={(blocks) => onUpdate({ 
+                    blocks,
+                    content: blocksToJson(blocks) 
+                  })}
+                />
+              )}
             </div>
           )}
           {lesson.type === "video" && (
@@ -751,63 +782,70 @@ export default function CourseBuilder() {
               </div>
             </div>
 
-            {/* Import from file */}
-            <div className="bg-gradient-to-r from-sigma-cyan/10 via-primary/10 to-sigma-purple/10 rounded-2xl border border-sigma-cyan/20 p-6">
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sigma-cyan to-primary flex items-center justify-center flex-shrink-0">
-                  <FileUp className="w-6 h-6 text-white" />
-                </div>
-                <div className="flex-1">
-                  <h3 className="font-display font-semibold text-lg mb-1">Импорт лекций из файлов</h3>
-                  <p className="text-muted-foreground text-sm mb-2">
-                    Загрузите несколько DOC, DOCX, HTML или TXT — каждый файл станет отдельной лекцией
-                  </p>
-                  {lessons.length > 0 && (
-                    <p className="text-xs text-primary mb-3">
-                      ✓ Загружено {lessons.length} {lessons.length === 1 ? 'лекция' : lessons.length < 5 ? 'лекции' : 'лекций'} — можете добавить ещё
+            {/* Import from file + AI Generation side by side */}
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Import from file */}
+              <div className="bg-gradient-to-r from-sigma-cyan/10 via-primary/10 to-sigma-purple/10 rounded-2xl border border-sigma-cyan/20 p-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sigma-cyan to-primary flex items-center justify-center flex-shrink-0">
+                    <FileUp className="w-6 h-6 text-white" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-display font-semibold text-lg mb-1">Импорт лекций из файлов</h3>
+                    <p className="text-muted-foreground text-sm mb-2">
+                      Загрузите DOC, DOCX, HTML или TXT — каждый файл станет лекцией
                     </p>
-                  )}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".doc,.docx,.html,.htm,.txt"
-                    onChange={handleFileImport}
-                    multiple
-                    className="hidden"
-                  />
-                  <Button 
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isImporting}
-                    className="rounded-xl gap-2"
-                    variant="outline"
-                  >
-                    {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileUp className="w-4 h-4" />}
-                    {isImporting ? "Импорт..." : lessons.length > 0 ? "Загрузить ещё файл" : "Загрузить файл"}
-                  </Button>
+                    {lessons.length > 0 && (
+                      <p className="text-xs text-primary mb-3">
+                        ✓ Загружено {lessons.length} {lessons.length === 1 ? 'лекция' : lessons.length < 5 ? 'лекции' : 'лекций'}
+                      </p>
+                    )}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".doc,.docx,.html,.htm,.txt"
+                      onChange={handleFileImport}
+                      multiple
+                      className="hidden"
+                    />
+                    <Button 
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isImporting}
+                      className="rounded-xl gap-2"
+                      variant="outline"
+                    >
+                      {isImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileUp className="w-4 h-4" />}
+                      {isImporting ? "Импорт..." : "Загрузить файл"}
+                    </Button>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* AI Generation */}
-            <div className="bg-gradient-to-r from-sigma-purple/10 via-primary/10 to-accent/10 rounded-2xl border border-sigma-purple/20 p-6">
-              <div className="flex items-start gap-4">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sigma-purple to-primary flex items-center justify-center flex-shrink-0">
-                  <Sparkles className="w-6 h-6 text-white" />
+              {/* AI Generation - Premium */}
+              <div className="bg-gradient-to-r from-muted/50 to-muted/30 rounded-2xl border border-border p-6 relative overflow-hidden">
+                <div className="absolute top-3 right-3">
+                  <span className="px-2 py-1 bg-sigma-orange/20 text-sigma-orange text-xs font-medium rounded-lg">
+                    Премиум
+                  </span>
                 </div>
-                <div className="flex-1">
-                  <h3 className="font-display font-semibold text-lg mb-1">ИИ-генератор курсов</h3>
-                  <p className="text-muted-foreground text-sm mb-4">
-                    Введите название курса и ИИ создаст структуру с лекциями и тестами
-                  </p>
-                  <Button 
-                    onClick={generateWithAI}
-                    disabled={!courseTitle || isGenerating}
-                    className="rounded-xl gap-2"
-                    variant="outline"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    {isGenerating ? "Генерация..." : "Сгенерировать структуру"}
-                  </Button>
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-muted-foreground/30 to-muted-foreground/20 flex items-center justify-center flex-shrink-0">
+                    <Sparkles className="w-6 h-6 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-display font-semibold text-lg mb-1 text-muted-foreground">ИИ-генератор курсов</h3>
+                    <p className="text-muted-foreground/70 text-sm mb-4">
+                      ИИ создаст структуру курса с лекциями и тестами
+                    </p>
+                    <Button 
+                      disabled
+                      className="rounded-xl gap-2 opacity-50"
+                      variant="outline"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      Доступно в премиум версии
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
