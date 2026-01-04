@@ -34,7 +34,10 @@ import {
   Send,
   FileCheck,
   Receipt,
-  CheckSquare
+  CheckSquare,
+  LayoutGrid,
+  List,
+  Filter
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -144,6 +147,9 @@ export default function OrganizationDashboard() {
   const [showAddStudentDialog, setShowAddStudentDialog] = useState(false);
   const [courses, setCourses] = useState<Course[]>([]);
   const [isLoadingCourses, setIsLoadingCourses] = useState(true);
+  const [courseFilter, setCourseFilter] = useState<"all" | "published" | "draft">("all");
+  const [courseViewMode, setCourseViewMode] = useState<"grid" | "list">("grid");
+  const [courseSearchQuery, setCourseSearchQuery] = useState("");
   const [newStudentName, setNewStudentName] = useState("");
   const [newStudentEmail, setNewStudentEmail] = useState("");
   const [selectedCourseId, setSelectedCourseId] = useState<string>("");
@@ -1748,86 +1754,257 @@ export default function OrganizationDashboard() {
           {/* Content based on active tab */}
 
           {activeTab === "courses" && (
-            <div>
+            <div className="space-y-6">
+              {/* Filters and View Toggle */}
+              <div className="bg-card rounded-2xl border border-border p-4">
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      <Input 
+                        placeholder="Поиск курсов..."
+                        value={courseSearchQuery}
+                        onChange={(e) => setCourseSearchQuery(e.target.value)}
+                        className="pl-10 w-64 rounded-xl"
+                      />
+                    </div>
+                    <Select value={courseFilter} onValueChange={(v) => setCourseFilter(v as "all" | "published" | "draft")}>
+                      <SelectTrigger className="w-40 rounded-xl">
+                        <Filter className="w-4 h-4 mr-2" />
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Все курсы</SelectItem>
+                        <SelectItem value="published">Опубликованные</SelectItem>
+                        <SelectItem value="draft">Черновики</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant={courseViewMode === "grid" ? "default" : "outline"}
+                      size="sm"
+                      className="rounded-lg"
+                      onClick={() => setCourseViewMode("grid")}
+                    >
+                      <LayoutGrid className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant={courseViewMode === "list" ? "default" : "outline"}
+                      size="sm"
+                      className="rounded-lg"
+                      onClick={() => setCourseViewMode("list")}
+                    >
+                      <List className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
               {isLoadingCourses ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 animate-spin text-primary" />
                 </div>
-              ) : courses.length === 0 ? (
-                <div className="text-center py-12 bg-card rounded-2xl border border-border">
-                  <BookOpen className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                  <h3 className="font-display font-semibold text-lg mb-2">Нет курсов</h3>
-                  <p className="text-muted-foreground mb-4">Создайте первый курс для обучения сотрудников</p>
-                  <Button onClick={() => navigate("/course-builder")} className="btn-gradient rounded-xl gap-2">
-                    <Plus className="w-4 h-4" />
-                    Создать курс
-                  </Button>
-                </div>
-              ) : (
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {courses.map((course) => (
-                    <div 
-                      key={course.id} 
-                      className="bg-card rounded-2xl border border-border overflow-hidden hover-lift group cursor-pointer"
-                      onClick={() => handleOpenCourseStudents(course)}
-                    >
-                      <div className="h-32 bg-gradient-to-br from-primary via-accent to-sigma-purple relative">
-                        {!course.is_published && (
-                          <span className="absolute top-3 right-3 px-2 py-1 bg-background/80 backdrop-blur-sm text-xs rounded-lg">
-                            Черновик
-                          </span>
-                        )}
-                        {course.is_published && (
-                          <span className="absolute top-3 right-3 px-2 py-1 bg-sigma-green/80 backdrop-blur-sm text-xs rounded-lg text-white">
-                            Опубликован
-                          </span>
-                        )}
-                      </div>
-                      <div className="p-6">
-                        <h3 className="font-display font-semibold text-lg mb-2">{course.title}</h3>
-                        <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
-                          <div className="flex items-center gap-1">
-                            <Users className="w-4 h-4" />
-                            {course.studentsCount}
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <BookOpen className="w-4 h-4" />
-                            {course.lessonsCount} уроков
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Clock className="w-4 h-4" />
-                            {course.duration}
-                          </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button 
-                            variant="outline" 
-                            className="flex-1 rounded-xl gap-2"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenCourseStudents(course);
-                            }}
-                          >
-                            <Users className="w-4 h-4" />
-                            Ученики
-                          </Button>
-                          <Button 
-                            variant="outline" 
-                            className="flex-1 rounded-xl gap-2"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(`/course-builder/${course.id}`);
-                            }}
-                          >
-                            <Edit className="w-4 h-4" />
-                            Редактировать
-                          </Button>
-                        </div>
-                      </div>
+              ) : (() => {
+                // Filter courses
+                const filteredCourses = courses.filter(course => {
+                  const matchesSearch = course.title.toLowerCase().includes(courseSearchQuery.toLowerCase()) ||
+                    (course.description || "").toLowerCase().includes(courseSearchQuery.toLowerCase());
+                  const matchesFilter = courseFilter === "all" || 
+                    (courseFilter === "published" && course.is_published) ||
+                    (courseFilter === "draft" && !course.is_published);
+                  return matchesSearch && matchesFilter;
+                });
+
+                if (courses.length === 0) {
+                  return (
+                    <div className="text-center py-12 bg-card rounded-2xl border border-border">
+                      <BookOpen className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                      <h3 className="font-display font-semibold text-lg mb-2">Нет курсов</h3>
+                      <p className="text-muted-foreground mb-4">Создайте первый курс для обучения сотрудников</p>
+                      <Button onClick={() => navigate("/course-builder")} className="btn-gradient rounded-xl gap-2">
+                        <Plus className="w-4 h-4" />
+                        Создать курс
+                      </Button>
                     </div>
-                  ))}
-                </div>
-              )}
+                  );
+                }
+
+                if (filteredCourses.length === 0) {
+                  return (
+                    <div className="text-center py-12 bg-card rounded-2xl border border-border">
+                      <Search className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+                      <h3 className="font-display font-semibold text-lg mb-2">Курсы не найдены</h3>
+                      <p className="text-muted-foreground">Попробуйте изменить параметры поиска или фильтра</p>
+                    </div>
+                  );
+                }
+
+                if (courseViewMode === "grid") {
+                  return (
+                    <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {filteredCourses.map((course) => (
+                        <div 
+                          key={course.id} 
+                          className="bg-card rounded-2xl border border-border overflow-hidden hover-lift group cursor-pointer"
+                          onClick={() => handleOpenCourseStudents(course)}
+                        >
+                          <div className="h-32 bg-gradient-to-br from-primary via-accent to-sigma-purple relative">
+                            {!course.is_published && (
+                              <span className="absolute top-3 right-3 px-2 py-1 bg-background/80 backdrop-blur-sm text-xs rounded-lg">
+                                Черновик
+                              </span>
+                            )}
+                            {course.is_published && (
+                              <span className="absolute top-3 right-3 px-2 py-1 bg-sigma-green/80 backdrop-blur-sm text-xs rounded-lg text-white">
+                                Опубликован
+                              </span>
+                            )}
+                          </div>
+                          <div className="p-6">
+                            <h3 className="font-display font-semibold text-lg mb-2">{course.title}</h3>
+                            <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
+                              <div className="flex items-center gap-1">
+                                <Users className="w-4 h-4" />
+                                {course.studentsCount}
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <BookOpen className="w-4 h-4" />
+                                {course.lessonsCount} уроков
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Clock className="w-4 h-4" />
+                                {course.duration}
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <Button 
+                                variant="outline" 
+                                className="flex-1 rounded-xl gap-2"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenCourseStudents(course);
+                                }}
+                              >
+                                <Users className="w-4 h-4" />
+                                Ученики
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                className="flex-1 rounded-xl gap-2"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  navigate(`/course-builder/${course.id}`);
+                                }}
+                              >
+                                <Edit className="w-4 h-4" />
+                                Редактировать
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }
+
+                // List view
+                return (
+                  <div className="bg-card rounded-2xl border border-border overflow-hidden">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Курс</th>
+                          <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Статус</th>
+                          <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Ученики</th>
+                          <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Уроки</th>
+                          <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Длительность</th>
+                          <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Действия</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredCourses.map((course) => (
+                          <tr 
+                            key={course.id} 
+                            className="border-b border-border last:border-0 hover:bg-secondary/50 transition-colors cursor-pointer"
+                            onClick={() => handleOpenCourseStudents(course)}
+                          >
+                            <td className="px-6 py-4">
+                              <div>
+                                <div className="font-medium">{course.title}</div>
+                                {course.description && (
+                                  <div className="text-sm text-muted-foreground line-clamp-1">{course.description}</div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                                course.is_published 
+                                  ? 'bg-sigma-green/10 text-sigma-green' 
+                                  : 'bg-muted text-muted-foreground'
+                              }`}>
+                                {course.is_published ? 'Опубликован' : 'Черновик'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary">
+                                <Users className="w-3 h-3" />
+                                {course.studentsCount}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-accent/10 text-accent">
+                                <BookOpen className="w-3 h-3" />
+                                {course.lessonsCount}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-muted-foreground">
+                              {course.duration}
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex gap-2">
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="rounded-lg gap-1"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenCourseStudents(course);
+                                  }}
+                                >
+                                  <Users className="w-4 h-4" />
+                                </Button>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="rounded-lg gap-1"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate(`/course-builder/${course.id}`);
+                                  }}
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </Button>
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="rounded-lg gap-1"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigate(`/course-preview/${course.id}`);
+                                  }}
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
