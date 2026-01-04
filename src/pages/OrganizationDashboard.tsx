@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import ImportStudentsForm from "@/components/ImportStudentsForm";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -1315,6 +1316,18 @@ export default function OrganizationDashboard() {
                   Добавить компанию
                 </Button>
               )}
+              {activeTab === "students" && (
+                <>
+                  <Button variant="outline" className="rounded-xl gap-2" onClick={() => setShowImportDialog(true)}>
+                    <FileSpreadsheet className="w-4 h-4" />
+                    Импорт учеников
+                  </Button>
+                  <Button className="btn-gradient rounded-xl gap-2" onClick={() => setShowAddStudentDialog(true)}>
+                    <Plus className="w-4 h-4" />
+                    Добавить ученика
+                  </Button>
+                </>
+              )}
               {activeTab === "courses" && (
                 <>
                   <Button variant="outline" className="rounded-xl gap-2" onClick={() => navigate("/course-import")}>
@@ -2154,6 +2167,109 @@ export default function OrganizationDashboard() {
               )}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Student Dialog */}
+      <Dialog open={showAddStudentDialog} onOpenChange={setShowAddStudentDialog}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display">Добавить ученика</DialogTitle>
+            <DialogDescription>
+              Создайте нового ученика и назначьте его на курс
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>ФИО ученика *</Label>
+              <Input 
+                placeholder="Иванов Иван Иванович" 
+                className="rounded-xl"
+                value={newStudentName}
+                onChange={(e) => setNewStudentName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Email *</Label>
+              <Input 
+                type="email"
+                placeholder="student@example.com" 
+                className="rounded-xl"
+                value={newStudentEmail}
+                onChange={(e) => setNewStudentEmail(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Курс (опционально)</Label>
+              <Select value={selectedCourseId} onValueChange={setSelectedCourseId}>
+                <SelectTrigger className="rounded-xl">
+                  <SelectValue placeholder="Выберите курс" />
+                </SelectTrigger>
+                <SelectContent>
+                  {courses.map((course) => (
+                    <SelectItem key={course.id} value={course.id}>
+                      {course.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-3 pt-2">
+              <Button 
+                variant="outline"
+                className="flex-1 rounded-xl"
+                onClick={() => handleCreateStudent(false)}
+                disabled={isCreatingStudent}
+              >
+                {isCreatingStudent ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Создание...
+                  </>
+                ) : (
+                  "Сохранить"
+                )}
+              </Button>
+              <Button 
+                className="flex-1 btn-gradient rounded-xl gap-2"
+                onClick={() => handleCreateStudent(true)}
+                disabled={isCreatingStudent}
+              >
+                {isCreatingStudent ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Создание...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    Сохранить и отправить
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Import Students Dialog */}
+      <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
+        <DialogContent className="rounded-2xl max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-display">Импорт учеников</DialogTitle>
+            <DialogDescription>
+              Загрузите Excel файл со списком учеников
+            </DialogDescription>
+          </DialogHeader>
+          <ImportStudentsForm 
+            organizationId={organizationId}
+            courses={courses}
+            onSuccess={() => {
+              setShowImportDialog(false);
+              // Refresh students list
+              window.location.reload();
+            }}
+          />
         </DialogContent>
       </Dialog>
     </div>
