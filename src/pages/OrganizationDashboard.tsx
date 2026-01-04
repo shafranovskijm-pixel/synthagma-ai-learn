@@ -854,7 +854,7 @@ export default function OrganizationDashboard() {
     setSelectedCoursesToAdd(new Set());
 
     try {
-      // Get all enrollments for this student
+      // Get all enrollments for this student with course data
       const { data: enrollments } = await supabase
         .from("enrollments")
         .select("id, course_id, progress, status")
@@ -862,9 +862,30 @@ export default function OrganizationDashboard() {
 
       const enrolledCourseIds = new Set((enrollments || []).map(e => e.course_id));
       
+      // Fetch all courses for this organization from DB
+      let orgCourses: Course[] = [];
+      if (organizationId) {
+        const { data: coursesData } = await supabase
+          .from("courses")
+          .select("id, title, description, is_published, created_at, duration, category_id, lessons(count)")
+          .eq("organization_id", organizationId);
+        
+        orgCourses = (coursesData || []).map((c: any) => ({
+          id: c.id,
+          title: c.title,
+          description: c.description,
+          is_published: c.is_published,
+          created_at: c.created_at,
+          lessonsCount: c.lessons?.[0]?.count || 0,
+          studentsCount: 0,
+          duration: c.duration || "—",
+          category_id: c.category_id
+        }));
+      }
+      
       // Map enrollments to course info
       const enrollmentsList = (enrollments || []).map(e => {
-        const course = courses.find(c => c.id === e.course_id);
+        const course = orgCourses.find(c => c.id === e.course_id);
         return {
           course: course || { id: e.course_id, title: "Неизвестный курс", description: null, is_published: false, created_at: "", lessonsCount: 0, studentsCount: 0, duration: "—" },
           enrollment_id: e.id,
@@ -875,7 +896,7 @@ export default function OrganizationDashboard() {
       setStudentEnrollments(enrollmentsList);
 
       // Get available courses (published, not already enrolled)
-      const available = courses.filter(c => c.is_published && !enrolledCourseIds.has(c.id));
+      const available = orgCourses.filter(c => c.is_published && !enrolledCourseIds.has(c.id));
       setAvailableCoursesForStudent(available);
     } catch (error) {
       console.error("Error loading student courses:", error);
