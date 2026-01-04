@@ -579,10 +579,21 @@ export default function OrganizationDashboard() {
     return password;
   };
 
+  // Validate email format
+  const isValidEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email.trim());
+  };
+
   // Create student (just save without sending email)
   const handleCreateStudent = async (sendEmail: boolean) => {
-    if (!organizationId || !newStudentName || !newStudentEmail) {
+    if (!organizationId || !newStudentName.trim() || !newStudentEmail.trim()) {
       toast.error("Заполните ФИО и Email");
+      return;
+    }
+
+    if (!isValidEmail(newStudentEmail)) {
+      toast.error("Введите корректный email адрес");
       return;
     }
 
