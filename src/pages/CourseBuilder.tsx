@@ -449,10 +449,19 @@ export default function CourseBuilder() {
         const formData = new FormData();
         chunk.forEach((file, i) => formData.append(`file_${offset + i}`, file));
 
+        // Get session for authorization
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          throw new Error('Необходима авторизация');
+        }
+
         const response = await fetch(
           `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/import-course`,
           {
             method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${session.access_token}`,
+            },
             body: formData,
           }
         );
