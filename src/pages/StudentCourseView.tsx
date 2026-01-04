@@ -249,8 +249,17 @@ export default function StudentCourseView() {
   // Extract text from blocks for TTS
   const extractTextFromBlocks = (blocks: any[]): string => {
     return blocks
-      .filter(b => b.type === "text" || b.type === "heading")
-      .map(b => b.content || "")
+      .filter(b => 
+        b.type === "text" || 
+        b.type === "paragraph" || 
+        b.type?.startsWith("heading")
+      )
+      .map(b => {
+        // Strip HTML tags from content
+        const raw = b.content || "";
+        return raw.replace(/<[^>]+>/g, "");
+      })
+      .filter(t => t.trim())
       .join(". ");
   };
 
