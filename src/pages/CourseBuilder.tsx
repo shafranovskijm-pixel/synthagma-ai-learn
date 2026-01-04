@@ -21,7 +21,11 @@ import {
   ChevronUp,
   Loader2,
   FileUp,
-  Headphones
+  Headphones,
+  Volume2,
+  Pause,
+  Play,
+  Square
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
@@ -96,6 +100,11 @@ function SortableLessonItem({
 }: SortableLessonProps) {
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   
+  // Voice (browser SpeechSynthesis) for preview
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isSpeechPaused, setIsSpeechPaused] = useState(false);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  
   const {
     attributes,
     listeners,
@@ -113,6 +122,92 @@ function SortableLessonItem({
   };
 
   const Icon = lessonIcons[lesson.type];
+
+  // Extract text from blocks for TTS
+  const extractTextFromBlocks = (blocks: ContentBlock[]): string => {
+    return blocks
+      .filter(b => 
+        b.type === "heading1" ||
+        b.type === "heading2" ||
+        b.type === "quote" ||
+        b.type === "bulletList" ||
+        b.type === "numberedList"
+      )
+      .map(b => {
+        const raw = b.content || "";
+        return raw.replace(/<[^>]+>/g, "");
+      })
+      .filter(t => t.trim())
+      .join(". ");
+  };
+
+  const handlePlayAudio = () => {
+    const blocks = lesson.blocks || [];
+    const textToSpeak = extractTextFromBlocks(blocks);
+    if (!textToSpeak.trim()) {
+      toast.error("Нет текста для озвучивания");
+      return;
+    }
+
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      toast.error("Озвучка не поддерживается в этом браузере");
+      return;
+    }
+
+    // Toggle pause/resume if already speaking
+    if (isSpeaking) {
+      if (isSpeechPaused) {
+        window.speechSynthesis.resume();
+        setIsSpeechPaused(false);
+      } else {
+        window.speechSynthesis.pause();
+        setIsSpeechPaused(true);
+      }
+      return;
+    }
+
+    // Start speaking
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    utterance.lang = "ru-RU";
+    utterance.rate = 1;
+    utterance.pitch = 1;
+
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      setIsSpeechPaused(false);
+      utteranceRef.current = null;
+    };
+
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      setIsSpeechPaused(false);
+      utteranceRef.current = null;
+      toast.error("Ошибка озвучивания");
+    };
+
+    utteranceRef.current = utterance;
+    setIsSpeaking(true);
+    setIsSpeechPaused(false);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const handleStopSpeech = () => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
+    setIsSpeechPaused(false);
+    utteranceRef.current = null;
+  };
+
+  // Stop speech when preview mode is turned off
+  useEffect(() => {
+    if (!isPreviewMode) {
+      handleStopSpeech();
+    }
+  }, [isPreviewMode]);
 
   return (
     <div 
@@ -195,12 +290,50 @@ function SortableLessonItem({
                 </Button>
               </div>
               {isPreviewMode ? (
-                <div className="bg-secondary/30 rounded-xl p-6 prose prose-sm dark:prose-invert max-w-none">
-                  <BlockEditor
-                    blocks={lesson.blocks || []}
-                    onChange={() => {}}
-                    readOnly
-                  />
+                <div className="relative">
+                  {/* Preview content styled like student view */}
+                  <div className="bg-secondary/30 rounded-xl p-6 prose prose-sm dark:prose-invert max-w-none min-h-[200px]">
+                    <BlockEditor
+                      blocks={lesson.blocks || []}
+                      onChange={() => {}}
+                      readOnly
+                    />
+                  </div>
+                  
+                  {/* Floating controls panel like in student view */}
+                  <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
+                    {/* Voice narration button */}
+                    <Button
+                      onClick={handlePlayAudio}
+                      variant="default"
+                      size="icon"
+                      className="w-12 h-12 rounded-full shadow-lg"
+                      title={isSpeaking ? (isSpeechPaused ? "Продолжить" : "Пауза") : "Озвучить"}
+                    >
+                      {isSpeaking ? (
+                        isSpeechPaused ? (
+                          <Play className="w-5 h-5" />
+                        ) : (
+                          <Pause className="w-5 h-5" />
+                        )
+                      ) : (
+                        <Volume2 className="w-5 h-5" />
+                      )}
+                    </Button>
+                    
+                    {/* Stop button when speaking */}
+                    {isSpeaking && (
+                      <Button
+                        onClick={handleStopSpeech}
+                        variant="destructive"
+                        size="icon"
+                        className="w-12 h-12 rounded-full shadow-lg"
+                        title="Остановить"
+                      >
+                        <Square className="w-5 h-5" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <BlockEditor
