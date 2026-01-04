@@ -242,11 +242,21 @@ export default function StudentCourseView() {
     }
   };
 
-  const goToNextLesson = () => {
+  const goToNextLesson = async () => {
     const idx = lessons.findIndex(l => l.id === selectedLessonId);
+    // Отмечаем текущий урок как пройденный (если это не тест)
+    if (selectedLessonId && selectedLesson?.type !== "test") {
+      await markLessonComplete(selectedLessonId);
+    }
     if (idx < lessons.length - 1) {
       setSelectedLessonId(lessons[idx + 1].id);
     }
+  };
+
+  const handleCompleteLesson = async () => {
+    if (!selectedLessonId || selectedLesson?.type === "test") return;
+    await markLessonComplete(selectedLessonId);
+    toast.success("Урок отмечен как пройденный");
   };
 
   const goToPrevLesson = () => {
@@ -657,18 +667,32 @@ export default function StudentCourseView() {
               )}
 
                 {/* Navigation */}
-                <div className="flex justify-between mt-8 pt-6 border-t border-border">
-                  {currentIndex > 0 ? (
-                    <Button variant="outline" onClick={goToPrevLesson}>
-                      ← Предыдущий урок
-                    </Button>
-                  ) : <div />}
-                  
-                  {currentIndex < lessons.length - 1 && (
-                    <Button onClick={goToNextLesson}>
-                      Следующий урок →
+                <div className="flex flex-col gap-4 mt-8 pt-6 border-t border-border">
+                  {selectedLesson?.type !== "test" && (
+                    <Button 
+                      onClick={handleCompleteLesson}
+                      className="w-full gap-2"
+                      size="lg"
+                      disabled={selectedLesson?.completed}
+                    >
+                      <CheckCircle2 className="w-5 h-5" />
+                      {selectedLesson?.completed ? "Урок пройден" : "Завершить урок"}
                     </Button>
                   )}
+                  
+                  <div className="flex justify-between">
+                    {currentIndex > 0 ? (
+                      <Button variant="outline" onClick={goToPrevLesson}>
+                        ← Предыдущий урок
+                      </Button>
+                    ) : <div />}
+                    
+                    {currentIndex < lessons.length - 1 && (
+                      <Button variant="ghost" onClick={goToNextLesson}>
+                        Следующий урок →
+                      </Button>
+                    )}
+                  </div>
                 </div>
             </div>
           ) : (
