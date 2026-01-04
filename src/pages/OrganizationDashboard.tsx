@@ -37,7 +37,9 @@ import {
   CheckSquare,
   LayoutGrid,
   List,
-  Filter
+  Filter,
+  Tag,
+  Palette
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -60,6 +62,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 
+interface CourseCategory {
+  id: string;
+  name: string;
+  color: string;
+}
+
 interface Course {
   id: string;
   title: string;
@@ -69,6 +77,7 @@ interface Course {
   lessonsCount?: number;
   studentsCount?: number;
   duration?: string;
+  category_id?: string | null;
 }
 
 interface Student {
@@ -224,6 +233,15 @@ export default function OrganizationDashboard() {
   // All profiles (students without enrollments)
   const [allProfiles, setAllProfiles] = useState<Student[]>([]);
   
+  // Categories state
+  const [categories, setCategories] = useState<CourseCategory[]>([]);
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>("all");
+  const [showCategoryDialog, setShowCategoryDialog] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryColor, setNewCategoryColor] = useState("#6366f1");
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<CourseCategory | null>(null);
+  
   // Statistics state
   const [stats, setStats] = useState({
     totalStudents: 0,
@@ -364,6 +382,15 @@ export default function OrganizationDashboard() {
           averageProgress
         });
 
+        // Fetch categories for organization
+        const { data: categoriesData } = await supabase
+          .from("course_categories")
+          .select("*")
+          .eq("organization_id", orgId)
+          .order("name");
+        
+        setCategories(categoriesData || []);
+
         // Get enrollment counts per course
         const coursesWithStats = (coursesData || []).map((course: any) => {
           const courseEnrollments = allEnrollments.filter(e => e.course_id === course.id);
@@ -376,6 +403,7 @@ export default function OrganizationDashboard() {
             lessonsCount: course.lessons?.[0]?.count || 0,
             studentsCount: courseEnrollments.length,
             duration: course.duration || "—",
+            category_id: course.category_id,
           };
         });
 
@@ -928,6 +956,124 @@ export default function OrganizationDashboard() {
       console.error("Error removing enrollment:", error);
       toast.error("Ошибка удаления");
     }
+  };
+
+  // Category management
+  const handleCreateCategory = async () => {
+    if (!organizationId || !newCategoryName.trim()) {
+      toast.error("Введите название категории");
+      return;
+    }
+
+    setIsCreatingCategory(true);
+    try {
+      const { data, error } = await supabase
+        .from("course_categories")
+        .insert({
+          organization_id: organizationId,
+          name: newCategoryName.trim(),
+          color: newCategoryColor
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setCategories([...categories, data]);
+      setNewCategoryName("");
+      setNewCategoryColor("#6366f1");
+      setShowCategoryDialog(false);
+      toast.success("Категория создана");
+    } catch (error) {
+      console.error("Error creating category:", error);
+      toast.error("Ошибка создания категории");
+    } finally {
+      setIsCreatingCategory(false);
+    }
+  };
+
+  const handleUpdateCategory = async () => {
+    if (!editingCategory || !newCategoryName.trim()) {
+      toast.error("Введите название категории");
+      return;
+    }
+
+    setIsCreatingCategory(true);
+    try {
+      const { error } = await supabase
+        .from("course_categories")
+        .update({
+          name: newCategoryName.trim(),
+          color: newCategoryColor
+        })
+        .eq("id", editingCategory.id);
+
+      if (error) throw error;
+
+      setCategories(categories.map(c => 
+        c.id === editingCategory.id 
+          ? { ...c, name: newCategoryName.trim(), color: newCategoryColor }
+          : c
+      ));
+      setNewCategoryName("");
+      setNewCategoryColor("#6366f1");
+      setEditingCategory(null);
+      setShowCategoryDialog(false);
+      toast.success("Категория обновлена");
+    } catch (error) {
+      console.error("Error updating category:", error);
+      toast.error("Ошибка обновления категории");
+    } finally {
+      setIsCreatingCategory(false);
+    }
+  };
+
+  const handleDeleteCategory = async (categoryId: string) => {
+    try {
+      const { error } = await supabase
+        .from("course_categories")
+        .delete()
+        .eq("id", categoryId);
+
+      if (error) throw error;
+
+      setCategories(categories.filter(c => c.id !== categoryId));
+      toast.success("Категория удалена");
+    } catch (error) {
+      console.error("Error deleting category:", error);
+      toast.error("Ошибка удаления категории");
+    }
+  };
+
+  const handleEditCategory = (category: CourseCategory) => {
+    setEditingCategory(category);
+    setNewCategoryName(category.name);
+    setNewCategoryColor(category.color);
+    setShowCategoryDialog(true);
+  };
+
+  const handleSetCourseCategory = async (courseId: string, categoryId: string | null) => {
+    try {
+      const { error } = await supabase
+        .from("courses")
+        .update({ category_id: categoryId })
+        .eq("id", courseId);
+
+      if (error) throw error;
+
+      setCourses(courses.map(c => 
+        c.id === courseId ? { ...c, category_id: categoryId } : c
+      ));
+      toast.success("Категория назначена");
+    } catch (error) {
+      console.error("Error setting category:", error);
+      toast.error("Ошибка назначения категории");
+    }
+  };
+
+  const getCategoryById = (categoryId: string | null | undefined): CourseCategory | undefined => {
+    if (!categoryId) return undefined;
+    return categories.find(c => c.id === categoryId);
   };
 
   // Filter organizations by search
@@ -1779,6 +1925,41 @@ export default function OrganizationDashboard() {
                         <SelectItem value="draft">Черновики</SelectItem>
                       </SelectContent>
                     </Select>
+                    <Select value={selectedCategoryFilter} onValueChange={setSelectedCategoryFilter}>
+                      <SelectTrigger className="w-48 rounded-xl">
+                        <Tag className="w-4 h-4 mr-2" />
+                        <SelectValue placeholder="Категория" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Все категории</SelectItem>
+                        <SelectItem value="none">Без категории</SelectItem>
+                        {categories.map(cat => (
+                          <SelectItem key={cat.id} value={cat.id}>
+                            <div className="flex items-center gap-2">
+                              <div 
+                                className="w-3 h-3 rounded-full" 
+                                style={{ backgroundColor: cat.color }}
+                              />
+                              {cat.name}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="rounded-lg gap-1"
+                      onClick={() => {
+                        setEditingCategory(null);
+                        setNewCategoryName("");
+                        setNewCategoryColor("#6366f1");
+                        setShowCategoryDialog(true);
+                      }}
+                    >
+                      <Plus className="w-4 h-4" />
+                      Категория
+                    </Button>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
@@ -1813,7 +1994,10 @@ export default function OrganizationDashboard() {
                   const matchesFilter = courseFilter === "all" || 
                     (courseFilter === "published" && course.is_published) ||
                     (courseFilter === "draft" && !course.is_published);
-                  return matchesSearch && matchesFilter;
+                  const matchesCategory = selectedCategoryFilter === "all" ||
+                    (selectedCategoryFilter === "none" && !course.category_id) ||
+                    course.category_id === selectedCategoryFilter;
+                  return matchesSearch && matchesFilter && matchesCategory;
                 });
 
                 if (courses.length === 0) {
@@ -1862,7 +2046,17 @@ export default function OrganizationDashboard() {
                             )}
                           </div>
                           <div className="p-6">
-                            <h3 className="font-display font-semibold text-lg mb-2">{course.title}</h3>
+                            <div className="flex items-center gap-2 mb-2">
+                              <h3 className="font-display font-semibold text-lg flex-1">{course.title}</h3>
+                              {getCategoryById(course.category_id) && (
+                                <span 
+                                  className="px-2 py-0.5 rounded-full text-xs font-medium text-white"
+                                  style={{ backgroundColor: getCategoryById(course.category_id)?.color }}
+                                >
+                                  {getCategoryById(course.category_id)?.name}
+                                </span>
+                              )}
+                            </div>
                             <div className="flex items-center gap-4 text-sm text-muted-foreground mb-4">
                               <div className="flex items-center gap-1">
                                 <Users className="w-4 h-4" />
@@ -1876,6 +2070,36 @@ export default function OrganizationDashboard() {
                                 <Clock className="w-4 h-4" />
                                 {course.duration}
                               </div>
+                            </div>
+                            <div className="flex gap-2 mb-3">
+                              <Select 
+                                value={course.category_id || "none"} 
+                                onValueChange={(v) => {
+                                  handleSetCourseCategory(course.id, v === "none" ? null : v);
+                                }}
+                              >
+                                <SelectTrigger 
+                                  className="flex-1 rounded-xl text-xs h-8"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <Tag className="w-3 h-3 mr-1" />
+                                  <SelectValue placeholder="Категория" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">Без категории</SelectItem>
+                                  {categories.map(cat => (
+                                    <SelectItem key={cat.id} value={cat.id}>
+                                      <div className="flex items-center gap-2">
+                                        <div 
+                                          className="w-3 h-3 rounded-full" 
+                                          style={{ backgroundColor: cat.color }}
+                                        />
+                                        {cat.name}
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </div>
                             <div className="flex gap-2">
                               <Button 
@@ -1915,10 +2139,10 @@ export default function OrganizationDashboard() {
                       <thead>
                         <tr className="border-b border-border">
                           <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Курс</th>
+                          <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Категория</th>
                           <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Статус</th>
                           <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Ученики</th>
                           <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Уроки</th>
-                          <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Длительность</th>
                           <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Действия</th>
                         </tr>
                       </thead>
@@ -1936,6 +2160,45 @@ export default function OrganizationDashboard() {
                                   <div className="text-sm text-muted-foreground line-clamp-1">{course.description}</div>
                                 )}
                               </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <Select 
+                                value={course.category_id || "none"} 
+                                onValueChange={(v) => {
+                                  handleSetCourseCategory(course.id, v === "none" ? null : v);
+                                }}
+                              >
+                                <SelectTrigger 
+                                  className="w-36 rounded-lg text-xs h-8"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {getCategoryById(course.category_id) ? (
+                                    <div className="flex items-center gap-2">
+                                      <div 
+                                        className="w-3 h-3 rounded-full" 
+                                        style={{ backgroundColor: getCategoryById(course.category_id)?.color }}
+                                      />
+                                      <span className="truncate">{getCategoryById(course.category_id)?.name}</span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground">—</span>
+                                  )}
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">Без категории</SelectItem>
+                                  {categories.map(cat => (
+                                    <SelectItem key={cat.id} value={cat.id}>
+                                      <div className="flex items-center gap-2">
+                                        <div 
+                                          className="w-3 h-3 rounded-full" 
+                                          style={{ backgroundColor: cat.color }}
+                                        />
+                                        {cat.name}
+                                      </div>
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </td>
                             <td className="px-6 py-4">
                               <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
@@ -1957,9 +2220,6 @@ export default function OrganizationDashboard() {
                                 <BookOpen className="w-3 h-3" />
                                 {course.lessonsCount}
                               </span>
-                            </td>
-                            <td className="px-6 py-4 text-sm text-muted-foreground">
-                              {course.duration}
                             </td>
                             <td className="px-6 py-4">
                               <div className="flex gap-2">
@@ -3227,6 +3487,126 @@ export default function OrganizationDashboard() {
               </TabsContent>
             </Tabs>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Category Dialog */}
+      <Dialog open={showCategoryDialog} onOpenChange={(open) => {
+        setShowCategoryDialog(open);
+        if (!open) {
+          setEditingCategory(null);
+          setNewCategoryName("");
+          setNewCategoryColor("#6366f1");
+        }
+      }}>
+        <DialogContent className="rounded-2xl max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display">
+              {editingCategory ? "Редактировать категорию" : "Новая категория"}
+            </DialogTitle>
+            <DialogDescription>
+              Категории помогают организовать курсы
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Название категории</Label>
+              <Input 
+                placeholder="Например: Безопасность"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                className="rounded-xl"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Цвет</Label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={newCategoryColor}
+                  onChange={(e) => setNewCategoryColor(e.target.value)}
+                  className="w-12 h-10 rounded-lg border border-border cursor-pointer"
+                />
+                <div className="flex gap-2 flex-wrap">
+                  {["#6366f1", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899"].map(color => (
+                    <button
+                      key={color}
+                      className={`w-8 h-8 rounded-lg transition-all ${newCategoryColor === color ? 'ring-2 ring-offset-2 ring-primary' : ''}`}
+                      style={{ backgroundColor: color }}
+                      onClick={() => setNewCategoryColor(color)}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            
+            {/* Category list for editing/deleting */}
+            {categories.length > 0 && !editingCategory && (
+              <div className="space-y-2 pt-4 border-t">
+                <Label className="text-muted-foreground">Существующие категории</Label>
+                <div className="space-y-2 max-h-40 overflow-y-auto">
+                  {categories.map(cat => (
+                    <div key={cat.id} className="flex items-center justify-between p-2 bg-secondary/30 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <div 
+                          className="w-4 h-4 rounded-full" 
+                          style={{ backgroundColor: cat.color }}
+                        />
+                        <span className="text-sm">{cat.name}</span>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-7 w-7 p-0"
+                          onClick={() => handleEditCategory(cat)}
+                        >
+                          <Edit className="w-3 h-3" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                          onClick={() => handleDeleteCategory(cat.id)}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            <div className="flex gap-2 pt-2">
+              {editingCategory && (
+                <Button 
+                  variant="outline" 
+                  className="flex-1 rounded-xl"
+                  onClick={() => {
+                    setEditingCategory(null);
+                    setNewCategoryName("");
+                    setNewCategoryColor("#6366f1");
+                  }}
+                >
+                  Отмена
+                </Button>
+              )}
+              <Button 
+                className="flex-1 btn-gradient rounded-xl"
+                onClick={editingCategory ? handleUpdateCategory : handleCreateCategory}
+                disabled={isCreatingCategory || !newCategoryName.trim()}
+              >
+                {isCreatingCategory ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : editingCategory ? (
+                  "Сохранить"
+                ) : (
+                  "Создать"
+                )}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
