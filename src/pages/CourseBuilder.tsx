@@ -68,6 +68,7 @@ export default function CourseBuilder() {
   const [isLoading, setIsLoading] = useState(!!courseId);
   const [isImporting, setIsImporting] = useState(false);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Import multiple files - chunked to avoid backend worker limits
@@ -148,6 +149,9 @@ export default function CourseBuilder() {
   useEffect(() => {
     const fetchData = async () => {
       if (!user) return;
+      
+      // Prevent re-fetching if data already loaded (would erase local changes)
+      if (isDataLoaded) return;
 
       // Get organization ID from profile
       const { data: profile, error: profileError } = await supabase
@@ -205,10 +209,12 @@ export default function CourseBuilder() {
       } else {
         setIsLoading(false);
       }
+      
+      setIsDataLoaded(true);
     };
 
     fetchData();
-  }, [user, courseId]);
+  }, [user, courseId, isDataLoaded]);
 
   const addLesson = (type: LessonType) => {
     const typeNames: Record<LessonType, string> = {
