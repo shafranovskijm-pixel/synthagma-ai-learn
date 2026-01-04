@@ -202,10 +202,17 @@ export default function StudentCourseView() {
       // Update enrollment progress
       const completedCount = lessons.filter(l => l.completed || l.id === lessonId).length;
       const progress = Math.round((completedCount / lessons.length) * 100);
+      
+      // If all lessons completed, mark enrollment as completed
+      const updateData: { progress: number; status?: string; completed_at?: string } = { progress };
+      if (progress === 100) {
+        updateData.status = "completed";
+        updateData.completed_at = new Date().toISOString();
+      }
 
       await supabase
         .from("enrollments")
-        .update({ progress })
+        .update(updateData)
         .eq("id", enrollmentId);
 
     } catch (error) {
