@@ -210,17 +210,14 @@ export default function AdminDashboard() {
 
       if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage
-        .from("org-documents")
-        .getPublicUrl(filePath);
-
+      // Store the file path for generating signed URLs on demand
       const { error: dbError } = await supabase
         .from("org_documents")
         .insert({
           organization_id: selectedOrg.id,
           type,
           name: file.name,
-          file_url: publicUrl
+          file_url: filePath // Store path, not public URL
         });
 
       if (dbError) throw dbError;
@@ -230,6 +227,37 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error("Error uploading document:", error);
       toast.error("Ошибка загрузки документа");
+    }
+  };
+
+  // Generate signed URL for document access
+  const getSignedDocumentUrl = async (bucketName: string, filePath: string): Promise<string | null> => {
+    const { data, error } = await supabase.storage
+      .from(bucketName)
+      .createSignedUrl(filePath, 3600); // 1 hour expiry
+    
+    if (error) {
+      console.error("Error creating signed URL:", error);
+      return null;
+    }
+    return data.signedUrl;
+  };
+
+  const handleOpenDocument = async (fileUrl: string | null) => {
+    if (!fileUrl) return;
+    
+    // If it's already a full URL (legacy), open directly
+    if (fileUrl.startsWith('http')) {
+      window.open(fileUrl, '_blank');
+      return;
+    }
+    
+    // Generate signed URL for private bucket access
+    const signedUrl = await getSignedDocumentUrl("org-documents", fileUrl);
+    if (signedUrl) {
+      window.open(signedUrl, '_blank');
+    } else {
+      toast.error("Не удалось открыть документ");
     }
   };
 
@@ -312,7 +340,7 @@ export default function AdminDashboard() {
                       variant="ghost" 
                       size="sm" 
                       className="rounded-lg"
-                      onClick={() => window.open(doc.file_url!, '_blank')}
+                      onClick={() => handleOpenDocument(doc.file_url)}
                     >
                       <Eye className="w-4 h-4" />
                     </Button>

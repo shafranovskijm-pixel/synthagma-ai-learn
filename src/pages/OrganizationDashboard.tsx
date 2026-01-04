@@ -663,17 +663,14 @@ export default function OrganizationDashboard() {
 
       if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage
-        .from("org-documents")
-        .getPublicUrl(filePath);
-
+      // Store file path for generating signed URLs on demand
       const { error: dbError } = await supabase
         .from("org_documents")
         .insert({
           organization_id: selectedOrg.id,
           type,
           name: file.name,
-          file_url: publicUrl
+          file_url: filePath // Store path, not public URL
         });
 
       if (dbError) throw dbError;
@@ -691,6 +688,37 @@ export default function OrganizationDashboard() {
     } catch (error) {
       console.error("Error uploading document:", error);
       toast.error("Ошибка загрузки документа");
+    }
+  };
+
+  // Generate signed URL for secure document access
+  const getSignedDocumentUrl = async (bucketName: string, filePath: string): Promise<string | null> => {
+    const { data, error } = await supabase.storage
+      .from(bucketName)
+      .createSignedUrl(filePath, 3600); // 1 hour expiry
+    
+    if (error) {
+      console.error("Error creating signed URL:", error);
+      return null;
+    }
+    return data.signedUrl;
+  };
+
+  const handleOpenDocument = async (fileUrl: string | null, bucketName: string = "org-documents") => {
+    if (!fileUrl) return;
+    
+    // If it's already a full URL (legacy), open directly
+    if (fileUrl.startsWith('http')) {
+      window.open(fileUrl, '_blank');
+      return;
+    }
+    
+    // Generate signed URL for private bucket access
+    const signedUrl = await getSignedDocumentUrl(bucketName, fileUrl);
+    if (signedUrl) {
+      window.open(signedUrl, '_blank');
+    } else {
+      toast.error("Не удалось открыть документ");
     }
   };
 
@@ -886,7 +914,7 @@ export default function OrganizationDashboard() {
                       variant="ghost" 
                       size="sm" 
                       className="rounded-lg"
-                      onClick={() => window.open(doc.file_url!, '_blank')}
+                      onClick={() => handleOpenDocument(doc.file_url, "org-documents")}
                     >
                       <Eye className="w-4 h-4" />
                     </Button>
@@ -1010,17 +1038,14 @@ export default function OrganizationDashboard() {
       
       if (uploadError) throw uploadError;
       
-      const { data: { publicUrl } } = supabase.storage
-        .from("student-documents")
-        .getPublicUrl(filePath);
-      
+      // Store file path for generating signed URLs on demand
       const { error: dbError } = await supabase
         .from("student_documents")
         .insert({
           enrollment_id: enrollmentId,
           type,
           name: file.name,
-          file_url: publicUrl
+          file_url: filePath // Store path, not public URL
         });
       
       if (dbError) throw dbError;
@@ -1104,11 +1129,14 @@ export default function OrganizationDashboard() {
               </div>
               <div className="flex gap-1">
                 {doc.file_url && (
-                  <a href={doc.file_url} target="_blank" rel="noopener noreferrer">
-                    <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                      <Download className="w-4 h-4" />
-                    </Button>
-                  </a>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-8 w-8 p-0"
+                    onClick={() => handleOpenDocument(doc.file_url, "student-documents")}
+                  >
+                    <Download className="w-4 h-4" />
+                  </Button>
                 )}
                 <Button
                   variant="ghost"
