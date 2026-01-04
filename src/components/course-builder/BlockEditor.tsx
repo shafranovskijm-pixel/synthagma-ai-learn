@@ -35,6 +35,23 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 // Configure DOMPurify to allow safe HTML tags for course content
 const sanitizeHtml = (html: string): string => {
@@ -156,12 +173,26 @@ export function BlockEditor({ blocks, onChange, readOnly = false }: BlockEditorP
     onChange(blocks.filter(b => b.id !== id));
   }, [blocks, onChange]);
 
-  const moveBlock = useCallback((fromIndex: number, toIndex: number) => {
-    const newBlocks = [...blocks];
-    const [removed] = newBlocks.splice(fromIndex, 1);
-    newBlocks.splice(toIndex, 0, removed);
-    onChange(newBlocks);
-  }, [blocks, onChange]);
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      const oldIndex = blocks.findIndex((b) => b.id === active.id);
+      const newIndex = blocks.findIndex((b) => b.id === over.id);
+      onChange(arrayMove(blocks, oldIndex, newIndex));
+    }
+  };
 
   if (readOnly) {
     return <BlockRenderer blocks={blocks} />;
@@ -177,20 +208,31 @@ export function BlockEditor({ blocks, onChange, readOnly = false }: BlockEditorP
         </div>
       )}
 
-      {blocks.map((block, index) => (
-        <BlockItem
-          key={block.id}
-          block={block}
-          index={index}
-          isFocused={focusedBlockId === block.id}
-          onFocus={() => setFocusedBlockId(block.id)}
-          onUpdate={(updates) => updateBlock(block.id, updates)}
-          onDelete={() => deleteBlock(block.id)}
-          onAddAfter={(type) => addBlock(type, index)}
-          onMoveUp={index > 0 ? () => moveBlock(index, index - 1) : undefined}
-          onMoveDown={index < blocks.length - 1 ? () => moveBlock(index, index + 1) : undefined}
-        />
-      ))}
+      {blocks.length > 0 && (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={blocks.map(b => b.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            {blocks.map((block, index) => (
+              <SortableBlockItem
+                key={block.id}
+                block={block}
+                index={index}
+                isFocused={focusedBlockId === block.id}
+                onFocus={() => setFocusedBlockId(block.id)}
+                onUpdate={(updates) => updateBlock(block.id, updates)}
+                onDelete={() => deleteBlock(block.id)}
+                onAddAfter={(type) => addBlock(type, index)}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
+      )}
 
       {blocks.length > 0 && (
         <div className="flex justify-center pt-2">
@@ -277,8 +319,8 @@ function AddBlockButton({ onAdd }: { onAdd: (type: BlockType) => void }) {
   );
 }
 
-// Block Item Component
-interface BlockItemProps {
+// Sortable Block Item Component
+interface SortableBlockItemProps {
   block: ContentBlock;
   index: number;
   isFocused: boolean;
@@ -286,11 +328,9 @@ interface BlockItemProps {
   onUpdate: (updates: Partial<ContentBlock>) => void;
   onDelete: () => void;
   onAddAfter: (type: BlockType) => void;
-  onMoveUp?: () => void;
-  onMoveDown?: () => void;
 }
 
-function BlockItem({ 
+function SortableBlockItem({ 
   block, 
   index, 
   isFocused, 
@@ -298,14 +338,29 @@ function BlockItem({
   onUpdate, 
   onDelete,
   onAddAfter,
-  onMoveUp,
-  onMoveDown
-}: BlockItemProps) {
+}: SortableBlockItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: block.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 1000 : 'auto',
+  };
+
   const config = blockTypeConfig[block.type];
-  const Icon = config.icon;
 
   return (
     <div 
+      ref={setNodeRef}
+      style={style}
       className={cn(
         "group relative flex gap-2 rounded-lg transition-all",
         isFocused && "bg-secondary/30"
@@ -314,7 +369,11 @@ function BlockItem({
     >
       {/* Drag handle & actions */}
       <div className="flex flex-col items-center gap-1 pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <div className="cursor-grab text-muted-foreground hover:text-foreground">
+        <div 
+          {...attributes}
+          {...listeners}
+          className="cursor-grab active:cursor-grabbing text-muted-foreground hover:text-foreground touch-none"
+        >
           <GripVertical className="w-4 h-4" />
         </div>
         <DropdownMenu>
