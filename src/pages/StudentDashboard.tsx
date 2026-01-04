@@ -47,6 +47,7 @@ export default function StudentDashboard() {
   const [activeTab, setActiveTab] = useState<"courses" | "chat">("courses");
   const [messages, setMessages] = useState(aiMessages);
   const [inputValue, setInputValue] = useState("");
+  const [isAiLoading, setIsAiLoading] = useState(false);
   const [courses, setCourses] = useState<Course[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -137,18 +138,48 @@ export default function StudentDashboard() {
     await signOut();
   };
 
-  const handleSendMessage = () => {
-    if (!inputValue.trim()) return;
+  const handleSendMessage = async () => {
+    if (!inputValue.trim() || isAiLoading) return;
     
-    setMessages(prev => [...prev, { role: "user", content: inputValue }]);
+    const userMessage = { role: "user", content: inputValue };
+    setMessages(prev => [...prev, userMessage]);
     setInputValue("");
-    
-    setTimeout(() => {
+    setIsAiLoading(true);
+
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gigachat`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({
+            messages: [...messages, userMessage].filter(m => m.role !== "assistant" || messages.indexOf(m) > 0),
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Ошибка ИИ");
+      }
+
       setMessages(prev => [...prev, { 
         role: "assistant", 
-        content: "Спасибо за ваш вопрос! Я анализирую материалы курса... Вот что я могу сказать: это важный аспект обучения, который требует внимательного изучения." 
+        content: data.content 
       }]);
-    }, 1500);
+    } catch (error) {
+      console.error("GigaChat error:", error);
+      setMessages(prev => [...prev, { 
+        role: "assistant", 
+        content: "Извините, произошла ошибка. Попробуйте ещё раз позже." 
+      }]);
+    } finally {
+      setIsAiLoading(false);
+    }
   };
 
   const totalProgress = courses.length > 0 
@@ -396,6 +427,14 @@ export default function StudentDashboard() {
                   </div>
                 </div>
               ))}
+              {isAiLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-secondary px-4 py-3 rounded-2xl rounded-tl-md flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span className="text-muted-foreground">Думаю...</span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Input */}
@@ -404,15 +443,17 @@ export default function StudentDashboard() {
                 <Input 
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+                  onKeyDown={(e) => e.key === "Enter" && !isAiLoading && handleSendMessage()}
                   placeholder="Задайте вопрос по материалам курса..." 
                   className="flex-1 h-12 rounded-xl"
+                  disabled={isAiLoading}
                 />
                 <Button 
                   onClick={handleSendMessage}
                   className="btn-gradient rounded-xl px-6 h-12"
+                  disabled={isAiLoading}
                 >
-                  <Send className="w-5 h-5" />
+                  {isAiLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
                 </Button>
               </div>
               <p className="text-center text-xs text-muted-foreground mt-3">
