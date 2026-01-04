@@ -29,6 +29,23 @@ import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { BlockEditor, ContentBlock, htmlToBlocks, blocksToJson, jsonToBlocks } from "@/components/course-builder/BlockEditor";
 import { TestQuestionEditor } from "@/components/course-builder/TestQuestionEditor";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 type LessonType = "text" | "video" | "image" | "test" | "audio";
 
@@ -56,6 +73,176 @@ const lessonColors = {
   test: "text-sigma-orange bg-sigma-orange/10",
   audio: "text-green-500 bg-green-500/10",
 };
+
+// Sortable Lesson Item Component
+interface SortableLessonProps {
+  lesson: Lesson;
+  index: number;
+  onToggle: () => void;
+  onUpdate: (updates: Partial<Lesson>) => void;
+  onSave: () => void;
+  onDelete: () => void;
+  courseId: string | undefined;
+}
+
+function SortableLessonItem({ 
+  lesson, 
+  index, 
+  onToggle, 
+  onUpdate, 
+  onSave, 
+  onDelete,
+  courseId
+}: SortableLessonProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: lesson.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 1000 : 'auto',
+  };
+
+  const Icon = lessonIcons[lesson.type];
+
+  return (
+    <div 
+      ref={setNodeRef} 
+      style={style}
+      className="border border-border rounded-xl overflow-hidden bg-card"
+    >
+      <div 
+        className="flex items-center gap-3 p-4 cursor-pointer hover:bg-secondary/50 transition-colors"
+        onClick={onToggle}
+      >
+        <div
+          {...attributes}
+          {...listeners}
+          className="cursor-grab active:cursor-grabbing touch-none"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <GripVertical className="w-4 h-4 text-muted-foreground" />
+        </div>
+        <span className="text-sm font-medium text-muted-foreground w-8">{index + 1}.</span>
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${lessonColors[lesson.type]}`}>
+          <Icon className="w-4 h-4" />
+        </div>
+        <Input 
+          value={lesson.title}
+          onChange={(e) => {
+            e.stopPropagation();
+            onUpdate({ title: e.target.value });
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="flex-1 border-0 bg-transparent focus-visible:ring-0 px-0"
+        />
+        <Button 
+          variant="outline" 
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSave();
+          }}
+          className="text-primary hover:text-primary gap-1"
+        >
+          <Save className="w-3 h-3" />
+          <span className="hidden sm:inline">Сохранить</span>
+        </Button>
+        <Button 
+          variant="ghost" 
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className="text-destructive hover:text-destructive"
+        >
+          <Trash2 className="w-4 h-4" />
+        </Button>
+        {lesson.expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+      </div>
+      
+      {lesson.expanded && (
+        <div className="p-4 pt-0 border-t border-border">
+          {lesson.type === "text" && (
+            <div className="space-y-3">
+              <BlockEditor
+                blocks={lesson.blocks || []}
+                onChange={(blocks) => onUpdate({ 
+                  blocks,
+                  content: blocksToJson(blocks) 
+                })}
+              />
+            </div>
+          )}
+          {lesson.type === "video" && (
+            <div className="space-y-3">
+              <Input
+                value={lesson.content}
+                onChange={(e) => onUpdate({ content: e.target.value })}
+                placeholder="Вставьте ссылку на видео (YouTube, Vimeo и др.)"
+                className="rounded-xl"
+              />
+              <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
+                <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Или загрузите видеофайл</p>
+              </div>
+            </div>
+          )}
+          {lesson.type === "audio" && (
+            <div className="space-y-3">
+              <Input
+                value={lesson.content}
+                onChange={(e) => onUpdate({ content: e.target.value })}
+                placeholder="Вставьте ссылку на аудио"
+                className="rounded-xl"
+              />
+              <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
+                <Headphones className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Загрузите аудиофайл (MP3, WAV, OGG)</p>
+                <input 
+                  type="file" 
+                  accept="audio/*" 
+                  className="mt-3"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      onUpdate({ content: `[Audio: ${file.name}]` });
+                    }
+                  }}
+                />
+              </div>
+              {lesson.content && lesson.content.startsWith('http') && (
+                <audio controls className="w-full mt-2">
+                  <source src={lesson.content} />
+                </audio>
+              )}
+            </div>
+          )}
+          {lesson.type === "image" && (
+            <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
+              <Image className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Загрузите изображения</p>
+            </div>
+          )}
+          {lesson.type === "test" && (
+            <TestQuestionEditor 
+              lessonId={lesson.id} 
+              courseId={courseId}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function CourseBuilder() {
   const navigate = useNavigate();
@@ -246,6 +433,27 @@ export default function CourseBuilder() {
 
   const toggleLesson = (id: string) => {
     setLessons(lessons.map(l => l.id === id ? { ...l, expanded: !l.expanded } : l));
+  };
+
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      const oldIndex = lessons.findIndex((l) => l.id === active.id);
+      const newIndex = lessons.findIndex((l) => l.id === over.id);
+      setLessons(arrayMove(lessons, oldIndex, newIndex));
+    }
   };
 
   const ensureOrganizationId = async (): Promise<string | null> => {
@@ -614,131 +822,31 @@ export default function CourseBuilder() {
                   <p>Добавьте первый урок или сгенерируйте структуру с помощью ИИ</p>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {lessons.map((lesson, index) => {
-                    const Icon = lessonIcons[lesson.type];
-                    return (
-                      <div key={lesson.id} className="border border-border rounded-xl overflow-hidden">
-                        <div 
-                          className="flex items-center gap-3 p-4 cursor-pointer hover:bg-secondary/50 transition-colors"
-                          onClick={() => toggleLesson(lesson.id)}
-                        >
-                          <GripVertical className="w-4 h-4 text-muted-foreground cursor-grab" />
-                          <span className="text-sm font-medium text-muted-foreground w-8">{index + 1}.</span>
-                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${lessonColors[lesson.type]}`}>
-                            <Icon className="w-4 h-4" />
-                          </div>
-                          <Input 
-                            value={lesson.title}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              updateLesson(lesson.id, { title: e.target.value });
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="flex-1 border-0 bg-transparent focus-visible:ring-0 px-0"
-                          />
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              saveSingleLesson(lesson, index);
-                            }}
-                            className="text-primary hover:text-primary gap-1"
-                          >
-                            <Save className="w-3 h-3" />
-                            <span className="hidden sm:inline">Сохранить</span>
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteLesson(lesson.id);
-                            }}
-                            className="text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                          {lesson.expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                        </div>
-                        
-                        {lesson.expanded && (
-                          <div className="p-4 pt-0 border-t border-border">
-                            {lesson.type === "text" && (
-                              <div className="space-y-3">
-                                <BlockEditor
-                                  blocks={lesson.blocks || []}
-                                  onChange={(blocks) => updateLesson(lesson.id, { 
-                                    blocks,
-                                    content: blocksToJson(blocks) 
-                                  })}
-                                />
-                              </div>
-                            )}
-                            {lesson.type === "video" && (
-                              <div className="space-y-3">
-                                <Input
-                                  value={lesson.content}
-                                  onChange={(e) => updateLesson(lesson.id, { content: e.target.value })}
-                                  placeholder="Вставьте ссылку на видео (YouTube, Vimeo и др.)"
-                                  className="rounded-xl"
-                                />
-                                <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
-                                  <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
-                                  <p className="text-sm text-muted-foreground">Или загрузите видеофайл</p>
-                                </div>
-                              </div>
-                            )}
-                            {lesson.type === "audio" && (
-                              <div className="space-y-3">
-                                <Input
-                                  value={lesson.content}
-                                  onChange={(e) => updateLesson(lesson.id, { content: e.target.value })}
-                                  placeholder="Вставьте ссылку на аудио"
-                                  className="rounded-xl"
-                                />
-                                <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
-                                  <Headphones className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
-                                  <p className="text-sm text-muted-foreground">Загрузите аудиофайл (MP3, WAV, OGG)</p>
-                                  <input 
-                                    type="file" 
-                                    accept="audio/*" 
-                                    className="mt-3"
-                                    onChange={(e) => {
-                                      const file = e.target.files?.[0];
-                                      if (file) {
-                                        // For now just store file name, later can upload to storage
-                                        updateLesson(lesson.id, { content: `[Audio: ${file.name}]` });
-                                      }
-                                    }}
-                                  />
-                                </div>
-                                {lesson.content && lesson.content.startsWith('http') && (
-                                  <audio controls className="w-full mt-2">
-                                    <source src={lesson.content} />
-                                  </audio>
-                                )}
-                              </div>
-                            )}
-                            {lesson.type === "image" && (
-                              <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
-                                <Image className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
-                                <p className="text-sm text-muted-foreground">Загрузите изображения</p>
-                              </div>
-                            )}
-                            {lesson.type === "test" && (
-                              <TestQuestionEditor 
-                                lessonId={lesson.id} 
-                                courseId={courseId}
-                              />
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext
+                    items={lessons.map(l => l.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="space-y-3">
+                      {lessons.map((lesson, index) => (
+                        <SortableLessonItem
+                          key={lesson.id}
+                          lesson={lesson}
+                          index={index}
+                          onToggle={() => toggleLesson(lesson.id)}
+                          onUpdate={(updates) => updateLesson(lesson.id, updates)}
+                          onSave={() => saveSingleLesson(lesson, index)}
+                          onDelete={() => deleteLesson(lesson.id)}
+                          courseId={courseId}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
               )}
             </div>
           </div>
