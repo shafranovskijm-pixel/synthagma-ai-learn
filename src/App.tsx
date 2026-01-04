@@ -12,6 +12,7 @@ import StudentRegister from "./pages/StudentRegister";
 import AdminDashboard from "./pages/AdminDashboard";
 import OrganizationDashboard from "./pages/OrganizationDashboard";
 import StudentDashboard from "./pages/StudentDashboard";
+import StudentCourseView from "./pages/StudentCourseView";
 import CourseBuilder from "./pages/CourseBuilder";
 import CoursePreview from "./pages/CoursePreview";
 import NotFound from "./pages/NotFound";
@@ -43,6 +44,11 @@ const App = () => (
             <Route path="/student" element={
               <ProtectedRoute requiredRole="student">
                 <StudentDashboard />
+              </ProtectedRoute>
+            } />
+            <Route path="/course/:courseId" element={
+              <ProtectedRoute requiredRole="student">
+                <StudentCourseView />
               </ProtectedRoute>
             } />
             <Route path="/course-builder" element={

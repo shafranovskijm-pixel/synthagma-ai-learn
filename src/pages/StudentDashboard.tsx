@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { SigmaLogo } from "@/components/ui/SigmaLogo";
@@ -41,6 +42,7 @@ const aiMessages = [
 ];
 
 export default function StudentDashboard() {
+  const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<"courses" | "chat">("courses");
   const [messages, setMessages] = useState(aiMessages);
@@ -339,6 +341,11 @@ export default function StudentDashboard() {
                         }`}
                         variant={course.status === "locked" || course.status === "completed" ? "outline" : "default"}
                         disabled={course.status === "locked"}
+                        onClick={() => {
+                          if (course.status !== "locked") {
+                            navigate(`/course/${course.id}`);
+                          }
+                        }}
                       >
                         {course.status === "locked" && <Lock className="w-4 h-4" />}
                         {course.status === "completed" && <CheckCircle2 className="w-4 h-4" />}
@@ -346,7 +353,7 @@ export default function StudentDashboard() {
                         {course.status === "locked" 
                           ? "Недоступен" 
                           : course.status === "completed" 
-                          ? "Пройден"
+                          ? "Повторить"
                           : "Продолжить"
                         }
                       </Button>
