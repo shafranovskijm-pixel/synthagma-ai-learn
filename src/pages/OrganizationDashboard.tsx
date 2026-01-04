@@ -197,6 +197,24 @@ export default function OrganizationDashboard() {
   const [enrollCourseId, setEnrollCourseId] = useState<string>("");
   const [isEnrolling, setIsEnrolling] = useState(false);
   
+  // Course details dialog (for assigning students to course)
+  const [showCourseStudentsDialog, setShowCourseStudentsDialog] = useState(false);
+  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
+  const [courseStudents, setCourseStudents] = useState<Student[]>([]);
+  const [availableStudentsForCourse, setAvailableStudentsForCourse] = useState<Student[]>([]);
+  const [isLoadingCourseStudents, setIsLoadingCourseStudents] = useState(false);
+  const [selectedStudentsToAdd, setSelectedStudentsToAdd] = useState<Set<string>>(new Set());
+  const [isAddingStudentsToCourse, setIsAddingStudentsToCourse] = useState(false);
+  
+  // Student course assignment dialog
+  const [showStudentCoursesDialog, setShowStudentCoursesDialog] = useState(false);
+  const [selectedStudentForCourses, setSelectedStudentForCourses] = useState<Student | null>(null);
+  const [studentEnrollments, setStudentEnrollments] = useState<{course: Course; enrollment_id: string; progress: number; status: string}[]>([]);
+  const [availableCoursesForStudent, setAvailableCoursesForStudent] = useState<Course[]>([]);
+  const [selectedCoursesToAdd, setSelectedCoursesToAdd] = useState<Set<string>>(new Set());
+  const [isLoadingStudentCourses, setIsLoadingStudentCourses] = useState(false);
+  const [isAddingCoursesToStudent, setIsAddingCoursesToStudent] = useState(false);
+  
   // All profiles (students without enrollments)
   const [allProfiles, setAllProfiles] = useState<Student[]>([]);
   
@@ -683,6 +701,226 @@ export default function OrganizationDashboard() {
       toast.error("Ошибка зачисления");
     } finally {
       setIsEnrolling(false);
+    }
+  };
+
+  // Open course details to assign students
+  const handleOpenCourseStudents = async (course: Course) => {
+    setSelectedCourse(course);
+    setShowCourseStudentsDialog(true);
+    setIsLoadingCourseStudents(true);
+    setSelectedStudentsToAdd(new Set());
+
+    try {
+      // Get students enrolled in this course
+      const { data: enrollments } = await supabase
+        .from("enrollments")
+        .select("id, user_id, progress, status")
+        .eq("course_id", course.id);
+
+      const enrolledStudentIds = new Set((enrollments || []).map(e => e.user_id));
+      
+      // Get profiles for enrolled students
+      const enrolledList: Student[] = [];
+      for (const enrollment of enrollments || []) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id, user_id, full_name, email")
+          .eq("user_id", enrollment.user_id)
+          .single();
+        
+        if (profile) {
+          enrolledList.push({
+            id: profile.id,
+            user_id: profile.user_id,
+            enrollment_id: enrollment.id,
+            name: profile.full_name || "Без имени",
+            email: profile.email || "",
+            course: course.title,
+            course_id: course.id,
+            progress: enrollment.progress,
+            lastActivity: null,
+            status: enrollment.status
+          });
+        }
+      }
+      setCourseStudents(enrolledList);
+
+      // Get all org students not enrolled in this course
+      if (organizationId) {
+        const { data: allProfiles } = await supabase
+          .from("profiles")
+          .select("id, user_id, full_name, email")
+          .eq("organization_id", organizationId);
+
+        const available = (allProfiles || [])
+          .filter(p => !enrolledStudentIds.has(p.user_id))
+          .map(p => ({
+            id: p.id,
+            user_id: p.user_id,
+            enrollment_id: null,
+            name: p.full_name || "Без имени",
+            email: p.email || "",
+            course: null,
+            course_id: null,
+            progress: 0,
+            lastActivity: null,
+            status: null
+          }));
+        setAvailableStudentsForCourse(available);
+      }
+    } catch (error) {
+      console.error("Error loading course students:", error);
+      toast.error("Ошибка загрузки данных");
+    } finally {
+      setIsLoadingCourseStudents(false);
+    }
+  };
+
+  // Add selected students to course
+  const handleAddStudentsToCourse = async () => {
+    if (!selectedCourse || selectedStudentsToAdd.size === 0) return;
+    
+    setIsAddingStudentsToCourse(true);
+    try {
+      const enrollmentsToInsert = Array.from(selectedStudentsToAdd).map(userId => ({
+        user_id: userId,
+        course_id: selectedCourse.id,
+        status: "active",
+        progress: 0
+      }));
+
+      const { error } = await supabase
+        .from("enrollments")
+        .insert(enrollmentsToInsert);
+
+      if (error) throw error;
+
+      toast.success(`Зачислено ${selectedStudentsToAdd.size} учеников`);
+      setSelectedStudentsToAdd(new Set());
+      
+      // Refresh course students
+      handleOpenCourseStudents(selectedCourse);
+    } catch (error) {
+      console.error("Error adding students to course:", error);
+      toast.error("Ошибка зачисления");
+    } finally {
+      setIsAddingStudentsToCourse(false);
+    }
+  };
+
+  // Open student courses dialog
+  const handleOpenStudentCourses = async (student: Student) => {
+    setSelectedStudentForCourses(student);
+    setShowStudentCoursesDialog(true);
+    setIsLoadingStudentCourses(true);
+    setSelectedCoursesToAdd(new Set());
+
+    try {
+      // Get all enrollments for this student
+      const { data: enrollments } = await supabase
+        .from("enrollments")
+        .select("id, course_id, progress, status")
+        .eq("user_id", student.user_id);
+
+      const enrolledCourseIds = new Set((enrollments || []).map(e => e.course_id));
+      
+      // Map enrollments to course info
+      const enrollmentsList = (enrollments || []).map(e => {
+        const course = courses.find(c => c.id === e.course_id);
+        return {
+          course: course || { id: e.course_id, title: "Неизвестный курс", description: null, is_published: false, created_at: "", lessonsCount: 0, studentsCount: 0, duration: "—" },
+          enrollment_id: e.id,
+          progress: e.progress,
+          status: e.status
+        };
+      });
+      setStudentEnrollments(enrollmentsList);
+
+      // Get available courses (published, not already enrolled)
+      const available = courses.filter(c => c.is_published && !enrolledCourseIds.has(c.id));
+      setAvailableCoursesForStudent(available);
+    } catch (error) {
+      console.error("Error loading student courses:", error);
+      toast.error("Ошибка загрузки данных");
+    } finally {
+      setIsLoadingStudentCourses(false);
+    }
+  };
+
+  // Add selected courses to student
+  const handleAddCoursesToStudent = async () => {
+    if (!selectedStudentForCourses || selectedCoursesToAdd.size === 0) return;
+    
+    setIsAddingCoursesToStudent(true);
+    try {
+      const enrollmentsToInsert = Array.from(selectedCoursesToAdd).map(courseId => ({
+        user_id: selectedStudentForCourses.user_id,
+        course_id: courseId,
+        status: "active",
+        progress: 0
+      }));
+
+      const { error } = await supabase
+        .from("enrollments")
+        .insert(enrollmentsToInsert);
+
+      if (error) throw error;
+
+      toast.success(`Назначено ${selectedCoursesToAdd.size} курсов`);
+      setSelectedCoursesToAdd(new Set());
+      
+      // Refresh student courses
+      handleOpenStudentCourses(selectedStudentForCourses);
+    } catch (error) {
+      console.error("Error adding courses to student:", error);
+      toast.error("Ошибка назначения");
+    } finally {
+      setIsAddingCoursesToStudent(false);
+    }
+  };
+
+  // Remove enrollment from course dialog
+  const handleRemoveFromCourse = async (enrollmentId: string) => {
+    try {
+      const { error } = await supabase
+        .from("enrollments")
+        .delete()
+        .eq("id", enrollmentId);
+      
+      if (error) throw error;
+      
+      toast.success("Ученик удалён из курса");
+      
+      // Refresh
+      if (selectedCourse) {
+        handleOpenCourseStudents(selectedCourse);
+      }
+    } catch (error) {
+      console.error("Error removing enrollment:", error);
+      toast.error("Ошибка удаления");
+    }
+  };
+
+  // Remove enrollment from student dialog
+  const handleRemoveCourseFromStudent = async (enrollmentId: string) => {
+    try {
+      const { error } = await supabase
+        .from("enrollments")
+        .delete()
+        .eq("id", enrollmentId);
+      
+      if (error) throw error;
+      
+      toast.success("Курс удалён");
+      
+      // Refresh
+      if (selectedStudentForCourses) {
+        handleOpenStudentCourses(selectedStudentForCourses);
+      }
+    } catch (error) {
+      console.error("Error removing enrollment:", error);
+      toast.error("Ошибка удаления");
     }
   };
 
@@ -1528,11 +1766,20 @@ export default function OrganizationDashboard() {
               ) : (
                 <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {courses.map((course) => (
-                    <div key={course.id} className="bg-card rounded-2xl border border-border overflow-hidden hover-lift group">
+                    <div 
+                      key={course.id} 
+                      className="bg-card rounded-2xl border border-border overflow-hidden hover-lift group cursor-pointer"
+                      onClick={() => handleOpenCourseStudents(course)}
+                    >
                       <div className="h-32 bg-gradient-to-br from-primary via-accent to-sigma-purple relative">
                         {!course.is_published && (
                           <span className="absolute top-3 right-3 px-2 py-1 bg-background/80 backdrop-blur-sm text-xs rounded-lg">
                             Черновик
+                          </span>
+                        )}
+                        {course.is_published && (
+                          <span className="absolute top-3 right-3 px-2 py-1 bg-sigma-green/80 backdrop-blur-sm text-xs rounded-lg text-white">
+                            Опубликован
                           </span>
                         )}
                       </div>
@@ -1552,14 +1799,30 @@ export default function OrganizationDashboard() {
                             {course.duration}
                           </div>
                         </div>
-                        <Button 
-                          variant="outline" 
-                          className="w-full rounded-xl gap-2"
-                          onClick={() => navigate(`/course-builder/${course.id}`)}
-                        >
-                          <Edit className="w-4 h-4" />
-                          Редактировать
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button 
+                            variant="outline" 
+                            className="flex-1 rounded-xl gap-2"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenCourseStudents(course);
+                            }}
+                          >
+                            <Users className="w-4 h-4" />
+                            Ученики
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            className="flex-1 rounded-xl gap-2"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/course-builder/${course.id}`);
+                            }}
+                          >
+                            <Edit className="w-4 h-4" />
+                            Редактировать
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -1748,9 +2011,12 @@ export default function OrganizationDashboard() {
                                 className="w-4 h-4 rounded border-border"
                               />
                             </td>
-                            <td className="px-6 py-4">
+                            <td 
+                              className="px-6 py-4 cursor-pointer"
+                              onClick={() => handleOpenStudentCourses(student)}
+                            >
                               <div>
-                                <div className="font-medium">{student.name}</div>
+                                <div className="font-medium hover:text-primary transition-colors">{student.name}</div>
                                 <div className="text-sm text-muted-foreground">{student.email}</div>
                               </div>
                             </td>
@@ -1793,6 +2059,15 @@ export default function OrganizationDashboard() {
                             </td>
                             <td className="px-6 py-4">
                               <div className="flex gap-2">
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="rounded-lg gap-1"
+                                  onClick={() => handleOpenStudentCourses(student)}
+                                >
+                                  <BookOpen className="w-4 h-4" />
+                                  Курсы
+                                </Button>
                                 {student.enrollment_id && (
                                   <>
                                     <Button 
@@ -1802,7 +2077,6 @@ export default function OrganizationDashboard() {
                                       onClick={() => handleViewStudent(student)}
                                     >
                                       <Eye className="w-4 h-4" />
-                                      Подробнее
                                     </Button>
                                     <Button 
                                       variant="ghost" 
@@ -1813,20 +2087,6 @@ export default function OrganizationDashboard() {
                                       <Trash2 className="w-4 h-4" />
                                     </Button>
                                   </>
-                                )}
-                                {!student.enrollment_id && (
-                                  <Button 
-                                    variant="outline" 
-                                    size="sm" 
-                                    className="rounded-lg gap-1"
-                                    onClick={() => {
-                                      setSelectedStudentIds(new Set([student.user_id]));
-                                      setShowEnrollDialog(true);
-                                    }}
-                                  >
-                                    <GraduationCap className="w-4 h-4" />
-                                    Зачислить
-                                  </Button>
                                 )}
                               </div>
                             </td>
@@ -2504,6 +2764,292 @@ export default function OrganizationDashboard() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Course Students Dialog */}
+      <Dialog open={showCourseStudentsDialog} onOpenChange={setShowCourseStudentsDialog}>
+        <DialogContent className="max-w-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-primary" />
+              {selectedCourse?.title}
+            </DialogTitle>
+            <DialogDescription>
+              Управление учениками курса
+            </DialogDescription>
+          </DialogHeader>
+          
+          {isLoadingCourseStudents ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            </div>
+          ) : (
+            <Tabs defaultValue="enrolled" className="mt-4">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="enrolled">Зачислены ({courseStudents.length})</TabsTrigger>
+                <TabsTrigger value="add">Добавить учеников</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="enrolled" className="space-y-3 mt-4">
+                {courseStudents.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Users className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>На этот курс никто не зачислен</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {courseStudents.map((student) => (
+                      <div 
+                        key={student.enrollment_id} 
+                        className="flex items-center justify-between p-4 bg-secondary/30 rounded-xl"
+                      >
+                        <div className="flex-1">
+                          <div className="font-medium">{student.name}</div>
+                          <div className="text-sm text-muted-foreground">{student.email}</div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <div className="text-sm font-medium">{student.progress}%</div>
+                            <div className="w-20 h-2 bg-secondary rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-primary rounded-full"
+                                style={{ width: `${student.progress}%` }}
+                              />
+                            </div>
+                          </div>
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${
+                            student.status === "completed" 
+                              ? 'bg-sigma-green/10 text-sigma-green' 
+                              : 'bg-primary/10 text-primary'
+                          }`}>
+                            {student.status === "completed" ? 'Завершён' : 'В процессе'}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => handleRemoveFromCourse(student.enrollment_id!)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="add" className="space-y-4 mt-4">
+                {availableStudentsForCourse.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <CheckCircle2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>Все ученики уже зачислены на этот курс</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground">
+                        Выберите учеников для зачисления
+                      </p>
+                      {selectedStudentsToAdd.size > 0 && (
+                        <Button
+                          onClick={handleAddStudentsToCourse}
+                          disabled={isAddingStudentsToCourse}
+                          className="btn-gradient rounded-xl gap-2"
+                        >
+                          {isAddingStudentsToCourse ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Plus className="w-4 h-4" />
+                          )}
+                          Зачислить ({selectedStudentsToAdd.size})
+                        </Button>
+                      )}
+                    </div>
+                    <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                      {availableStudentsForCourse.map((student) => {
+                        const isSelected = selectedStudentsToAdd.has(student.user_id);
+                        return (
+                          <div 
+                            key={student.user_id}
+                            className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-colors ${
+                              isSelected ? 'bg-primary/10 border border-primary/30' : 'bg-secondary/30 hover:bg-secondary/50'
+                            }`}
+                            onClick={() => {
+                              const newSet = new Set(selectedStudentsToAdd);
+                              if (isSelected) {
+                                newSet.delete(student.user_id);
+                              } else {
+                                newSet.add(student.user_id);
+                              }
+                              setSelectedStudentsToAdd(newSet);
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              readOnly
+                              className="w-4 h-4 rounded border-border"
+                            />
+                            <div className="flex-1">
+                              <div className="font-medium">{student.name}</div>
+                              <div className="text-sm text-muted-foreground">{student.email}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </TabsContent>
+            </Tabs>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Student Courses Dialog */}
+      <Dialog open={showStudentCoursesDialog} onOpenChange={setShowStudentCoursesDialog}>
+        <DialogContent className="max-w-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl flex items-center gap-2">
+              <GraduationCap className="w-5 h-5 text-primary" />
+              {selectedStudentForCourses?.name}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedStudentForCourses?.email}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {isLoadingStudentCourses ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            </div>
+          ) : (
+            <Tabs defaultValue="enrolled" className="mt-4">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="enrolled">Курсы ученика ({studentEnrollments.length})</TabsTrigger>
+                <TabsTrigger value="add">Назначить курс</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="enrolled" className="space-y-3 mt-4">
+                {studentEnrollments.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <BookOpen className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>Ученик не зачислен ни на один курс</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {studentEnrollments.map((enrollment) => (
+                      <div 
+                        key={enrollment.enrollment_id} 
+                        className="flex items-center justify-between p-4 bg-secondary/30 rounded-xl"
+                      >
+                        <div className="flex-1">
+                          <div className="font-medium">{enrollment.course.title}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {enrollment.course.lessonsCount} уроков • {enrollment.course.duration || '—'}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <div className="text-sm font-medium">{enrollment.progress}%</div>
+                            <div className="w-20 h-2 bg-secondary rounded-full overflow-hidden">
+                              <div 
+                                className="h-full bg-primary rounded-full"
+                                style={{ width: `${enrollment.progress}%` }}
+                              />
+                            </div>
+                          </div>
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${
+                            enrollment.status === "completed" 
+                              ? 'bg-sigma-green/10 text-sigma-green' 
+                              : 'bg-primary/10 text-primary'
+                          }`}>
+                            {enrollment.status === "completed" ? 'Завершён' : 'В процессе'}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => handleRemoveCourseFromStudent(enrollment.enrollment_id)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="add" className="space-y-4 mt-4">
+                {availableCoursesForStudent.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <CheckCircle2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>Ученик зачислен на все доступные курсы</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-muted-foreground">
+                        Выберите курсы для назначения
+                      </p>
+                      {selectedCoursesToAdd.size > 0 && (
+                        <Button
+                          onClick={handleAddCoursesToStudent}
+                          disabled={isAddingCoursesToStudent}
+                          className="btn-gradient rounded-xl gap-2"
+                        >
+                          {isAddingCoursesToStudent ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Plus className="w-4 h-4" />
+                          )}
+                          Назначить ({selectedCoursesToAdd.size})
+                        </Button>
+                      )}
+                    </div>
+                    <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                      {availableCoursesForStudent.map((course) => {
+                        const isSelected = selectedCoursesToAdd.has(course.id);
+                        return (
+                          <div 
+                            key={course.id}
+                            className={`flex items-center gap-3 p-4 rounded-xl cursor-pointer transition-colors ${
+                              isSelected ? 'bg-primary/10 border border-primary/30' : 'bg-secondary/30 hover:bg-secondary/50'
+                            }`}
+                            onClick={() => {
+                              const newSet = new Set(selectedCoursesToAdd);
+                              if (isSelected) {
+                                newSet.delete(course.id);
+                              } else {
+                                newSet.add(course.id);
+                              }
+                              setSelectedCoursesToAdd(newSet);
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              readOnly
+                              className="w-4 h-4 rounded border-border"
+                            />
+                            <div className="flex-1">
+                              <div className="font-medium">{course.title}</div>
+                              <div className="text-sm text-muted-foreground">
+                                {course.lessonsCount} уроков • {course.studentsCount} учеников
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </TabsContent>
+            </Tabs>
+          )}
         </DialogContent>
       </Dialog>
     </div>
