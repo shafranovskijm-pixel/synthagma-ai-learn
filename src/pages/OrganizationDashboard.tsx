@@ -242,6 +242,9 @@ export default function OrganizationDashboard() {
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [editingCategory, setEditingCategory] = useState<CourseCategory | null>(null);
   
+  // Student filter state
+  const [studentStatusFilter, setStudentStatusFilter] = useState<"all" | "active" | "completed" | "not_enrolled">("all");
+  
   // Statistics state
   const [stats, setStats] = useState({
     totalStudents: 0,
@@ -1590,10 +1593,19 @@ export default function OrganizationDashboard() {
     }
   };
 
-  const filteredStudents = students.filter(s => 
-    s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    s.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredStudents = students.filter(s => {
+    const matchesSearch = s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      s.email.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    if (!matchesSearch) return false;
+    
+    if (studentStatusFilter === "all") return true;
+    if (studentStatusFilter === "active") return s.status === "active";
+    if (studentStatusFilter === "completed") return s.status === "completed";
+    if (studentStatusFilter === "not_enrolled") return !s.course_id;
+    
+    return true;
+  });
 
 
   // Student document section
@@ -2389,6 +2401,18 @@ export default function OrganizationDashboard() {
                       Зачислить на курс ({selectedStudentIds.size})
                     </Button>
                   )}
+                  <Select value={studentStatusFilter} onValueChange={(v) => setStudentStatusFilter(v as any)}>
+                    <SelectTrigger className="w-44 rounded-xl">
+                      <Filter className="w-4 h-4 mr-2" />
+                      <SelectValue placeholder="Статус" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Все статусы</SelectItem>
+                      <SelectItem value="active">Активные</SelectItem>
+                      <SelectItem value="completed">Завершили</SelectItem>
+                      <SelectItem value="not_enrolled">Не зачислены</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <div className="relative">
                     <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                     <Input 
