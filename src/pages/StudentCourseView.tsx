@@ -3,19 +3,18 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { SigmaLogo } from "@/components/ui/SigmaLogo";
-import { 
-  ArrowLeft, 
-  Loader2, 
-  ChevronRight, 
-  CheckCircle2, 
+import {
+  ArrowLeft,
+  Loader2,
+  ChevronRight,
+  CheckCircle2,
   Play,
   BookOpen,
   Clock,
   Menu,
   X,
   Volume2,
-  VolumeX,
-  Pause
+  Pause,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { BlockEditor, jsonToBlocks } from "@/components/course-builder/BlockEditor";
@@ -57,10 +56,10 @@ export default function StudentCourseView() {
   const [enrollmentId, setEnrollmentId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   
-  // Audio state
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Voice (browser SpeechSynthesis)
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isSpeechPaused, setIsSpeechPaused] = useState(false);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   
   // Test state
   const [testQuestions, setTestQuestions] = useState<TestQuestion[]>([]);
@@ -255,70 +254,65 @@ export default function StudentCourseView() {
       .join(". ");
   };
 
-  const handlePlayAudio = async () => {
-    if (isPlaying && audioRef.current) {
-      audioRef.current.pause();
-      setIsPlaying(false);
-      return;
-    }
-
+  const handlePlayAudio = () => {
     const textToSpeak = extractTextFromBlocks(blocks);
     if (!textToSpeak.trim()) {
       toast.error("Нет текста для озвучивания");
       return;
     }
 
-    setIsLoadingAudio(true);
-    try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/text-to-speech`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({ text: textToSpeak, voice: "nova" }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error("Failed to generate audio");
-      }
-
-      const audioBlob = await response.blob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-      
-      if (audioRef.current) {
-        audioRef.current.pause();
-      }
-      
-      const audio = new Audio(audioUrl);
-      audioRef.current = audio;
-      
-      audio.onended = () => setIsPlaying(false);
-      audio.onerror = () => {
-        setIsPlaying(false);
-        toast.error("Ошибка воспроизведения");
-      };
-      
-      await audio.play();
-      setIsPlaying(true);
-    } catch (error) {
-      console.error("TTS error:", error);
-      toast.error("Озвучка временно недоступна");
-    } finally {
-      setIsLoadingAudio(false);
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      toast.error("Озвучка не поддерживается в этом браузере");
+      return;
     }
+
+    // Toggle pause/resume if already speaking
+    if (isSpeaking) {
+      if (isSpeechPaused) {
+        window.speechSynthesis.resume();
+        setIsSpeechPaused(false);
+      } else {
+        window.speechSynthesis.pause();
+        setIsSpeechPaused(true);
+      }
+      return;
+    }
+
+    // Start speaking
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    utterance.lang = "ru-RU";
+    utterance.rate = 1;
+    utterance.pitch = 1;
+
+    utterance.onend = () => {
+      setIsSpeaking(false);
+      setIsSpeechPaused(false);
+      utteranceRef.current = null;
+    };
+
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      setIsSpeechPaused(false);
+      utteranceRef.current = null;
+      toast.error("Ошибка озвучивания");
+    };
+
+    utteranceRef.current = utterance;
+    setIsSpeaking(true);
+    setIsSpeechPaused(false);
+    window.speechSynthesis.speak(utterance);
   };
 
-  // Stop audio when lesson changes
+  // Stop voice when lesson changes
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      setIsPlaying(false);
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
     }
+    setIsSpeaking(false);
+    setIsSpeechPaused(false);
+    utteranceRef.current = null;
   }, [selectedLessonId]);
 
   const selectedLesson = lessons.find(l => l.id === selectedLessonId);
@@ -447,17 +441,18 @@ export default function StudentCourseView() {
                       size="sm"
                       className="rounded-xl gap-2"
                       onClick={handlePlayAudio}
-                      disabled={isLoadingAudio}
                     >
-                      {isLoadingAudio ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : isPlaying ? (
-                        <Pause className="w-4 h-4" />
+                      {isSpeaking ? (
+                        isSpeechPaused ? (
+                          <Play className="w-4 h-4" />
+                        ) : (
+                          <Pause className="w-4 h-4" />
+                        )
                       ) : (
                         <Volume2 className="w-4 h-4" />
                       )}
                       <span className="hidden sm:inline">
-                        {isLoadingAudio ? "Загрузка..." : isPlaying ? "Пауза" : "Озвучить"}
+                        {isSpeaking ? (isSpeechPaused ? "Продолжить" : "Пауза") : "Озвучить"}
                       </span>
                     </Button>
                   )}
