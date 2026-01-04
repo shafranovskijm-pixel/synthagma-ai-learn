@@ -15,6 +15,9 @@ import {
   X,
   Volume2,
   Pause,
+  MessageCircle,
+  Send,
+  Square,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { BlockEditor, jsonToBlocks } from "@/components/course-builder/BlockEditor";
@@ -66,6 +69,13 @@ export default function StudentCourseView() {
   const [userAnswers, setUserAnswers] = useState<Record<string, number>>({});
   const [testResult, setTestResult] = useState<{score: number; max_score: number; passed: boolean} | null>(null);
   const [isSubmittingTest, setIsSubmittingTest] = useState(false);
+
+  // AI Chat state
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<{role: "user" | "assistant"; content: string}[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const fetchCourse = async () => {
@@ -323,6 +333,66 @@ export default function StudentCourseView() {
     setIsSpeechPaused(false);
     utteranceRef.current = null;
   }, [selectedLessonId]);
+
+  // Scroll chat to bottom
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
+
+  // Stop speech completely
+  const handleStopSpeech = () => {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
+    setIsSpeechPaused(false);
+    utteranceRef.current = null;
+  };
+
+  // Send message to AI
+  const handleSendChatMessage = async () => {
+    if (!chatInput.trim() || isAiLoading) return;
+
+    const userMessage = chatInput.trim();
+    setChatInput("");
+    setChatMessages(prev => [...prev, { role: "user", content: userMessage }]);
+    setIsAiLoading(true);
+
+    try {
+      const messagesToSend = [...chatMessages, { role: "user", content: userMessage }]
+        .filter(m => m.role === "user" || m.role === "assistant");
+
+      const response = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/gigachat`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          },
+          body: JSON.stringify({ messages: messagesToSend }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      setChatMessages(prev => [...prev, { role: "assistant", content: data.content }]);
+    } catch (error) {
+      console.error("AI chat error:", error);
+      setChatMessages(prev => [
+        ...prev,
+        { role: "assistant", content: "Извините, произошла ошибка. Попробуйте ещё раз." }
+      ]);
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
 
   const selectedLesson = lessons.find(l => l.id === selectedLessonId);
   const blocks = selectedLesson?.content ? jsonToBlocks(selectedLesson.content) : [];
@@ -603,6 +673,112 @@ export default function StudentCourseView() {
           )}
         </div>
       </div>
+
+      {/* Floating Action Buttons - Always visible */}
+      <div className="fixed bottom-6 right-6 z-40 flex flex-col gap-3">
+        {/* Voice Controls */}
+        {selectedLesson?.type === "text" && blocks.length > 0 && (
+          <div className="flex gap-2">
+            {isSpeaking && (
+              <Button
+                size="icon"
+                variant="destructive"
+                className="rounded-full w-12 h-12 shadow-lg"
+                onClick={handleStopSpeech}
+              >
+                <Square className="w-5 h-5" />
+              </Button>
+            )}
+            <Button
+              size="icon"
+              variant={isSpeaking ? "secondary" : "default"}
+              className="rounded-full w-12 h-12 shadow-lg"
+              onClick={handlePlayAudio}
+            >
+              {isSpeaking ? (
+                isSpeechPaused ? <Play className="w-5 h-5" /> : <Pause className="w-5 h-5" />
+              ) : (
+                <Volume2 className="w-5 h-5" />
+              )}
+            </Button>
+          </div>
+        )}
+
+        {/* AI Chat Button */}
+        <Button
+          size="icon"
+          className="rounded-full w-14 h-14 shadow-lg btn-gradient"
+          onClick={() => setIsChatOpen(!isChatOpen)}
+        >
+          {isChatOpen ? <X className="w-6 h-6" /> : <MessageCircle className="w-6 h-6" />}
+        </Button>
+      </div>
+
+      {/* AI Chat Panel */}
+      {isChatOpen && (
+        <div className="fixed bottom-24 right-6 z-40 w-80 sm:w-96 bg-card border border-border rounded-2xl shadow-2xl flex flex-col max-h-[60vh]">
+          <div className="p-4 border-b border-border flex items-center justify-between">
+            <h3 className="font-display font-semibold">ИИ Консультант</h3>
+            <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(false)}>
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+
+          <div 
+            ref={chatScrollRef}
+            className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[200px]"
+          >
+            {chatMessages.length === 0 ? (
+              <div className="text-center text-muted-foreground text-sm py-8">
+                <MessageCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p>Задайте вопрос по материалу курса</p>
+              </div>
+            ) : (
+              chatMessages.map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={cn(
+                    "p-3 rounded-xl text-sm max-w-[85%]",
+                    msg.role === "user"
+                      ? "bg-primary text-primary-foreground ml-auto"
+                      : "bg-secondary"
+                  )}
+                >
+                  {msg.content}
+                </div>
+              ))
+            )}
+            {isAiLoading && (
+              <div className="bg-secondary p-3 rounded-xl text-sm max-w-[85%] flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Думаю...
+              </div>
+            )}
+          </div>
+
+          <div className="p-3 border-t border-border">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleSendChatMessage()}
+                placeholder="Введите вопрос..."
+                className="flex-1 bg-secondary rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                disabled={isAiLoading}
+              />
+              <Button
+                size="icon"
+                className="rounded-xl"
+                onClick={handleSendChatMessage}
+                disabled={isAiLoading || !chatInput.trim()}
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
