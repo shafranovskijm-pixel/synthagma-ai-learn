@@ -33,7 +33,8 @@ import {
   Save,
   Send,
   FileCheck,
-  Receipt
+  Receipt,
+  CheckSquare
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -69,14 +70,15 @@ interface Course {
 
 interface Student {
   id: string;
-  enrollment_id: string;
+  user_id: string;
+  enrollment_id: string | null;
   name: string;
   email: string;
-  course: string;
-  course_id: string;
+  course: string | null;
+  course_id: string | null;
   progress: number;
-  lastActivity: string;
-  status: string;
+  lastActivity: string | null;
+  status: string | null;
 }
 
 interface Organization {
@@ -189,6 +191,15 @@ export default function OrganizationDashboard() {
   const [isCreatingLink, setIsCreatingLink] = useState(false);
   const [isCreatingStudent, setIsCreatingStudent] = useState(false);
   
+  // Student selection for bulk actions
+  const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
+  const [showEnrollDialog, setShowEnrollDialog] = useState(false);
+  const [enrollCourseId, setEnrollCourseId] = useState<string>("");
+  const [isEnrolling, setIsEnrolling] = useState(false);
+  
+  // All profiles (students without enrollments)
+  const [allProfiles, setAllProfiles] = useState<Student[]>([]);
+  
   // Statistics state
   const [stats, setStats] = useState({
     totalStudents: 0,
@@ -253,40 +264,74 @@ export default function OrganizationDashboard() {
           allEnrollments = enrollmentsData || [];
         }
 
-        // Calculate stats
-        const totalStudents = allEnrollments.length;
-        const totalCourses = coursesData?.length || 0;
-        const completedCount = allEnrollments.filter(e => e.status === 'completed').length;
-        const averageProgress = totalStudents > 0 
-          ? Math.round(allEnrollments.reduce((sum, e) => sum + (e.progress || 0), 0) / totalStudents)
-          : 0;
+        // Fetch ALL students (profiles) for this organization
+        const { data: allProfilesData } = await supabase
+          .from("profiles")
+          .select("id, user_id, full_name, email")
+          .eq("organization_id", orgId);
 
-        // Build students list from enrollments
-        const studentsList: Student[] = [];
+        // Build a map of user enrollments
+        const userEnrollmentsMap: Record<string, any[]> = {};
         for (const enrollment of allEnrollments) {
-          const course = coursesData?.find((c: any) => c.id === enrollment.course_id);
-          const { data: studentProfile } = await supabase
-            .from("profiles")
-            .select("full_name, email")
-            .eq("user_id", enrollment.user_id)
-            .single();
+          if (!userEnrollmentsMap[enrollment.user_id]) {
+            userEnrollmentsMap[enrollment.user_id] = [];
+          }
+          userEnrollmentsMap[enrollment.user_id].push(enrollment);
+        }
+
+        // Build students list - one entry per profile with their enrollments
+        const studentsList: Student[] = [];
+        const profilesWithoutEnrollments: Student[] = [];
+        
+        for (const profile of allProfilesData || []) {
+          const userEnrollments = userEnrollmentsMap[profile.user_id] || [];
           
-          if (studentProfile) {
-            studentsList.push({
-              id: enrollment.user_id,
-              enrollment_id: enrollment.id,
-              name: studentProfile.full_name || "Без имени",
-              email: studentProfile.email || "",
-              course: course?.title || "—",
-              course_id: enrollment.course_id,
-              progress: enrollment.progress || 0,
-              lastActivity: enrollment.started_at,
-              status: enrollment.status
+          if (userEnrollments.length === 0) {
+            // Student without any course enrollment
+            profilesWithoutEnrollments.push({
+              id: profile.id,
+              user_id: profile.user_id,
+              enrollment_id: null,
+              name: profile.full_name || "Без имени",
+              email: profile.email || "",
+              course: null,
+              course_id: null,
+              progress: 0,
+              lastActivity: null,
+              status: null
             });
+          } else {
+            // Student with enrollments - create entry for each enrollment
+            for (const enrollment of userEnrollments) {
+              const course = coursesData?.find((c: any) => c.id === enrollment.course_id);
+              studentsList.push({
+                id: profile.id,
+                user_id: profile.user_id,
+                enrollment_id: enrollment.id,
+                name: profile.full_name || "Без имени",
+                email: profile.email || "",
+                course: course?.title || "—",
+                course_id: enrollment.course_id,
+                progress: enrollment.progress || 0,
+                lastActivity: enrollment.started_at,
+                status: enrollment.status
+              });
+            }
           }
         }
-        setStudents(studentsList);
+
+        // Combine: first students with enrollments, then without
+        setStudents([...studentsList, ...profilesWithoutEnrollments]);
+        setAllProfiles(profilesWithoutEnrollments);
         setIsLoadingStudents(false);
+
+        // Calculate stats
+        const totalStudents = (allProfilesData || []).length;
+        const totalCourses = coursesData?.length || 0;
+        const completedCount = allEnrollments.filter(e => e.status === 'completed').length;
+        const averageProgress = allEnrollments.length > 0 
+          ? Math.round(allEnrollments.reduce((sum, e) => sum + (e.progress || 0), 0) / allEnrollments.length)
+          : 0;
 
         setStats({
           totalStudents,
@@ -512,37 +557,8 @@ export default function OrganizationDashboard() {
         toast.success(`Ученик создан. Пароль: ${password} (сохраните его!)`);
       }
 
-      // Refresh students list
-      const { data: enrollments } = await supabase
-        .from("enrollments")
-        .select(`
-          id,
-          progress,
-          status,
-          started_at,
-          course_id,
-          courses!inner(id, title, organization_id),
-          profiles!inner(user_id, full_name, email)
-        `)
-        .eq("courses.organization_id", organizationId);
-
-      if (enrollments) {
-        const studentsList: Student[] = [];
-        for (const enrollment of enrollments as any[]) {
-          studentsList.push({
-            id: enrollment.profiles.user_id,
-            enrollment_id: enrollment.id,
-            name: enrollment.profiles.full_name || "Без имени",
-            email: enrollment.profiles.email || "",
-            course: enrollment.courses.title,
-            course_id: enrollment.course_id,
-            progress: enrollment.progress || 0,
-            lastActivity: enrollment.started_at,
-            status: enrollment.status
-          });
-        }
-        setStudents(studentsList);
-      }
+      // Refresh students list - reload page to get all students including those without enrollments
+      window.location.reload();
 
       setShowAddStudentDialog(false);
       setNewStudentName("");
@@ -556,7 +572,11 @@ export default function OrganizationDashboard() {
     }
   };
 
-  const handleDeleteStudent = async (enrollmentId: string) => {
+  const handleDeleteStudent = async (enrollmentId: string | null) => {
+    if (!enrollmentId) {
+      toast.error("Нельзя удалить — нет зачисления");
+      return;
+    }
     try {
       const { error } = await supabase
         .from("enrollments")
@@ -570,6 +590,99 @@ export default function OrganizationDashboard() {
     } catch (error) {
       console.error("Error deleting enrollment:", error);
       toast.error("Ошибка удаления");
+    }
+  };
+
+  // Toggle student selection
+  const toggleStudentSelection = (uniqueId: string) => {
+    const newSet = new Set(selectedStudentIds);
+    if (newSet.has(uniqueId)) {
+      newSet.delete(uniqueId);
+    } else {
+      newSet.add(uniqueId);
+    }
+    setSelectedStudentIds(newSet);
+  };
+
+  // Select all students
+  const toggleSelectAll = () => {
+    if (selectedStudentIds.size === students.length) {
+      setSelectedStudentIds(new Set());
+    } else {
+      const allIds = students.map(s => s.enrollment_id || s.user_id);
+      setSelectedStudentIds(new Set(allIds));
+    }
+  };
+
+  // Get unique user_ids from selected students
+  const getSelectedUserIds = (): string[] => {
+    const userIds = new Set<string>();
+    for (const student of students) {
+      const uniqueId = student.enrollment_id || student.user_id;
+      if (selectedStudentIds.has(uniqueId)) {
+        userIds.add(student.user_id);
+      }
+    }
+    return Array.from(userIds);
+  };
+
+  // Bulk enroll students to course
+  const handleBulkEnroll = async () => {
+    if (!enrollCourseId) {
+      toast.error("Выберите курс");
+      return;
+    }
+
+    const userIds = getSelectedUserIds();
+    if (userIds.length === 0) {
+      toast.error("Выберите учеников");
+      return;
+    }
+
+    setIsEnrolling(true);
+    try {
+      // Check existing enrollments for this course
+      const { data: existingEnrollments } = await supabase
+        .from("enrollments")
+        .select("user_id")
+        .eq("course_id", enrollCourseId)
+        .in("user_id", userIds);
+
+      const existingUserIds = new Set((existingEnrollments || []).map(e => e.user_id));
+      const newUserIds = userIds.filter(id => !existingUserIds.has(id));
+
+      if (newUserIds.length === 0) {
+        toast.info("Все выбранные ученики уже зачислены на этот курс");
+        setShowEnrollDialog(false);
+        return;
+      }
+
+      // Create enrollments for new users
+      const enrollmentsToInsert = newUserIds.map(userId => ({
+        user_id: userId,
+        course_id: enrollCourseId,
+        status: "active",
+        progress: 0
+      }));
+
+      const { error } = await supabase
+        .from("enrollments")
+        .insert(enrollmentsToInsert);
+
+      if (error) throw error;
+
+      toast.success(`Зачислено ${newUserIds.length} учеников`);
+      setShowEnrollDialog(false);
+      setSelectedStudentIds(new Set());
+      setEnrollCourseId("");
+
+      // Refresh students list
+      window.location.reload();
+    } catch (error) {
+      console.error("Error enrolling students:", error);
+      toast.error("Ошибка зачисления");
+    } finally {
+      setIsEnrolling(false);
     }
   };
 
@@ -628,6 +741,7 @@ export default function OrganizationDashboard() {
           if (profile) {
             studentsList.push({
               id: enrollment.user_id,
+              user_id: enrollment.user_id,
               enrollment_id: enrollment.id,
               name: profile.full_name || "Без имени",
               email: profile.email || "",
@@ -1563,16 +1677,27 @@ export default function OrganizationDashboard() {
 
           {activeTab === "students" && (
             <div className="bg-card rounded-2xl border border-border">
-              <div className="p-6 border-b border-border flex items-center justify-between">
+              <div className="p-6 border-b border-border flex items-center justify-between flex-wrap gap-4">
                 <h2 className="font-display text-xl font-semibold">Все ученики</h2>
-                <div className="relative">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <Input 
-                    placeholder="Поиск по имени или email..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 w-64 rounded-xl"
-                  />
+                <div className="flex items-center gap-3 flex-wrap">
+                  {selectedStudentIds.size > 0 && (
+                    <Button 
+                      onClick={() => setShowEnrollDialog(true)}
+                      className="btn-gradient rounded-xl gap-2"
+                    >
+                      <GraduationCap className="w-4 h-4" />
+                      Зачислить на курс ({selectedStudentIds.size})
+                    </Button>
+                  )}
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input 
+                      placeholder="Поиск по имени или email..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-10 w-64 rounded-xl"
+                    />
+                  </div>
                 </div>
               </div>
               
@@ -1590,6 +1715,14 @@ export default function OrganizationDashboard() {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-border">
+                        <th className="text-left px-4 py-4 text-sm font-medium text-muted-foreground w-12">
+                          <input
+                            type="checkbox"
+                            checked={selectedStudentIds.size === filteredStudents.length && filteredStudents.length > 0}
+                            onChange={toggleSelectAll}
+                            className="w-4 h-4 rounded border-border"
+                          />
+                        </th>
                         <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Ученик</th>
                         <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Курс</th>
                         <th className="text-left px-6 py-4 text-sm font-medium text-muted-foreground">Прогресс</th>
@@ -1598,60 +1731,108 @@ export default function OrganizationDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredStudents.map((student) => (
-                        <tr key={student.enrollment_id} className="border-b border-border last:border-0 hover:bg-secondary/50 transition-colors">
-                          <td className="px-6 py-4">
-                            <div>
-                              <div className="font-medium">{student.name}</div>
-                              <div className="text-sm text-muted-foreground">{student.email}</div>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-sm">{student.course}</td>
-                          <td className="px-6 py-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-24 h-2 bg-secondary rounded-full overflow-hidden">
-                                <div 
-                                  className="h-full bg-primary rounded-full transition-all"
-                                  style={{ width: `${student.progress}%` }}
-                                />
+                      {filteredStudents.map((student) => {
+                        const uniqueId = student.enrollment_id || student.user_id;
+                        const isSelected = selectedStudentIds.has(uniqueId);
+                        
+                        return (
+                          <tr 
+                            key={uniqueId} 
+                            className={`border-b border-border last:border-0 hover:bg-secondary/50 transition-colors ${isSelected ? 'bg-primary/5' : ''}`}
+                          >
+                            <td className="px-4 py-4">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => toggleStudentSelection(uniqueId)}
+                                className="w-4 h-4 rounded border-border"
+                              />
+                            </td>
+                            <td className="px-6 py-4">
+                              <div>
+                                <div className="font-medium">{student.name}</div>
+                                <div className="text-sm text-muted-foreground">{student.email}</div>
                               </div>
-                              <span className="text-sm font-medium">{student.progress}%</span>
-                            </div>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                              student.status === 'completed' 
-                                ? 'bg-sigma-green/10 text-sigma-green' 
-                                : student.status === 'active'
-                                  ? 'bg-primary/10 text-primary'
-                                  : 'bg-muted text-muted-foreground'
-                            }`}>
-                              {student.status === 'completed' ? 'Завершён' : student.status === 'active' ? 'Активен' : student.status}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex gap-2">
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="rounded-lg gap-1"
-                                onClick={() => handleViewStudent(student)}
-                              >
-                                <Eye className="w-4 h-4" />
-                                Подробнее
-                              </Button>
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
-                                className="rounded-lg text-destructive hover:text-destructive"
-                                onClick={() => handleDeleteStudent(student.enrollment_id)}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td className="px-6 py-4 text-sm">
+                              {student.course || (
+                                <span className="text-muted-foreground italic">Не зачислен</span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4">
+                              {student.course_id ? (
+                                <div className="flex items-center gap-3">
+                                  <div className="w-24 h-2 bg-secondary rounded-full overflow-hidden">
+                                    <div 
+                                      className="h-full bg-primary rounded-full transition-all"
+                                      style={{ width: `${student.progress}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-sm font-medium">{student.progress}%</span>
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4">
+                              {student.status ? (
+                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
+                                  student.status === 'completed' 
+                                    ? 'bg-sigma-green/10 text-sigma-green' 
+                                    : student.status === 'active'
+                                      ? 'bg-primary/10 text-primary'
+                                      : 'bg-muted text-muted-foreground'
+                                }`}>
+                                  {student.status === 'completed' ? 'Завершён' : student.status === 'active' ? 'Активен' : student.status}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-sigma-orange/10 text-sigma-orange">
+                                  Не зачислен
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex gap-2">
+                                {student.enrollment_id && (
+                                  <>
+                                    <Button 
+                                      variant="outline" 
+                                      size="sm" 
+                                      className="rounded-lg gap-1"
+                                      onClick={() => handleViewStudent(student)}
+                                    >
+                                      <Eye className="w-4 h-4" />
+                                      Подробнее
+                                    </Button>
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      className="rounded-lg text-destructive hover:text-destructive"
+                                      onClick={() => handleDeleteStudent(student.enrollment_id)}
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </>
+                                )}
+                                {!student.enrollment_id && (
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm" 
+                                    className="rounded-lg gap-1"
+                                    onClick={() => {
+                                      setSelectedStudentIds(new Set([student.user_id]));
+                                      setShowEnrollDialog(true);
+                                    }}
+                                  >
+                                    <GraduationCap className="w-4 h-4" />
+                                    Зачислить
+                                  </Button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -2270,6 +2451,59 @@ export default function OrganizationDashboard() {
               window.location.reload();
             }}
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Enroll Dialog */}
+      <Dialog open={showEnrollDialog} onOpenChange={setShowEnrollDialog}>
+        <DialogContent className="max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display">Зачислить на курс</DialogTitle>
+            <DialogDescription>
+              Выберите курс для зачисления {selectedStudentIds.size} {selectedStudentIds.size === 1 ? 'ученика' : 'учеников'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="space-y-2">
+              <Label>Курс</Label>
+              <Select value={enrollCourseId} onValueChange={setEnrollCourseId}>
+                <SelectTrigger className="rounded-xl">
+                  <SelectValue placeholder="Выберите курс" />
+                </SelectTrigger>
+                <SelectContent>
+                  {courses.filter(c => c.is_published).map((course) => (
+                    <SelectItem key={course.id} value={course.id}>
+                      {course.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowEnrollDialog(false);
+                  setEnrollCourseId("");
+                }}
+                className="rounded-xl"
+              >
+                Отмена
+              </Button>
+              <Button 
+                onClick={handleBulkEnroll}
+                disabled={isEnrolling || !enrollCourseId}
+                className="btn-gradient rounded-xl gap-2"
+              >
+                {isEnrolling ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <GraduationCap className="w-4 h-4" />
+                )}
+                Зачислить
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
