@@ -28,6 +28,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
 import { BlockEditor, ContentBlock, htmlToBlocks, blocksToJson, jsonToBlocks } from "@/components/course-builder/BlockEditor";
+import { TestQuestionEditor } from "@/components/course-builder/TestQuestionEditor";
 
 type LessonType = "text" | "video" | "image" | "test" | "audio";
 
@@ -727,13 +728,10 @@ export default function CourseBuilder() {
                               </div>
                             )}
                             {lesson.type === "test" && (
-                              <div className="space-y-3">
-                                <p className="text-sm text-muted-foreground">Добавьте вопросы для теста</p>
-                                <Button variant="outline" size="sm" className="rounded-lg gap-2">
-                                  <Plus className="w-4 h-4" />
-                                  Добавить вопрос
-                                </Button>
-                              </div>
+                              <TestQuestionEditor 
+                                lessonId={lesson.id} 
+                                courseId={courseId}
+                              />
                             )}
                           </div>
                         )}
