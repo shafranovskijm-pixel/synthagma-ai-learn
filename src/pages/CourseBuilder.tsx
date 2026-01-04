@@ -656,24 +656,26 @@ export default function CourseBuilder() {
       let savedCourseId = courseId;
 
       if (courseId) {
-        // Update existing course
+        // Update existing course - also ensure it's published
         const { error } = await supabase
           .from("courses")
           .update({
             title: courseTitle.trim(),
             description: courseDescription.trim() || null,
+            is_published: true,
           })
           .eq("id", courseId);
 
         if (error) throw error;
       } else {
-        // Create new course
+        // Create new course - published by default
         const { data: newCourse, error } = await supabase
           .from("courses")
           .insert({
             title: courseTitle.trim(),
             description: courseDescription.trim() || null,
             organization_id: orgId,
+            is_published: true,
           })
           .select()
           .single();
