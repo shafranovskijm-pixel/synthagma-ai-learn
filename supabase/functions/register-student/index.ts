@@ -80,7 +80,10 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
 
-    // Create user with admin API
+    // Try to create user with admin API
+    let userId: string;
+    let isExistingUser = false;
+
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,
@@ -92,18 +95,49 @@ const handler = async (req: Request): Promise<Response> => {
     });
 
     if (authError) {
-      console.error("Auth error:", authError);
-      return new Response(
-        JSON.stringify({ error: authError.message }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      // Check if user already exists
+      if (authError.code === "email_exists") {
+        console.log("User already exists, looking up existing user");
+        
+        // Find existing user by email
+        const { data: existingUsers, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+        
+        if (listError) {
+          console.error("Error listing users:", listError);
+          return new Response(
+            JSON.stringify({ error: "Failed to find existing user" }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const existingUser = existingUsers.users.find(u => u.email === email);
+        
+        if (!existingUser) {
+          return new Response(
+            JSON.stringify({ error: "User exists but could not be found" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        userId = existingUser.id;
+        isExistingUser = true;
+        console.log("Found existing user:", userId);
+      } else {
+        console.error("Auth error:", authError);
+        return new Response(
+          JSON.stringify({ error: authError.message }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+    } else {
+      userId = authData.user.id;
+      console.log("New user created:", userId);
     }
 
-    const userId = authData.user.id;
-    console.log("User created:", userId);
-
-    // Wait a moment for the trigger to create profile and role
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Wait a moment for the trigger to create profile and role (only for new users)
+    if (!isExistingUser) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
 
     // Update profile with organization_id (trigger creates profile with student role)
     const { error: profileError } = await supabaseAdmin
